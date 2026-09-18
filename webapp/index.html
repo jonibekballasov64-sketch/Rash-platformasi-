@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Milliy sertifikat testi</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="top-bar">
+      <span id="timer">--:--:--</span>
+      <button id="finish-btn" class="danger small">Yakunlash</button>
+    </header>
+
+    <main id="question-area">
+      <p>Yuklanmoqda...</p>
+    </main>
+
+    <nav id="nav-bar">
+      <button id="prev-btn">← Ortga</button>
+      <div id="progress"></div>
+      <button id="next-btn">Keyingi →</button>
+    </nav>
+  </div>
+
+  <div id="confirm-modal" class="modal hidden">
+    <div class="modal-box">
+      <p id="confirm-text"></p>
+      <div class="modal-actions">
+        <button id="confirm-ok">Ok</button>
+        <button id="confirm-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
