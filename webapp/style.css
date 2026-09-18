@@ -1,0 +1,105 @@
+:root {
+  --blue: #1d63d6;
+  --blue-bg: #dbeaff;
+  --yellow-bg: #fff3b0;
+  --green: #1a8a3d;
+  --red: #d1293d;
+  --gray: #666;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #f6f7fb;
+  color: #1a1a1a;
+}
+
+#app { display: flex; flex-direction: column; min-height: 100vh; }
+
+#top-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; background: #fff; border-bottom: 1px solid #e3e3e3;
+  position: sticky; top: 0; z-index: 5;
+}
+#timer { font-weight: 700; font-size: 15px; }
+
+button {
+  border: none; border-radius: 8px; padding: 8px 14px; font-size: 14px;
+  cursor: pointer; background: var(--blue); color: #fff;
+}
+button.small { padding: 6px 10px; font-size: 12px; }
+button.danger { background: var(--red); }
+button:disabled { opacity: .4; cursor: default; }
+
+#question-area { flex: 1; padding: 16px; padding-bottom: 90px; }
+
+.passage-box {
+  background: #fff; border: 1px solid #e0e0e0; border-radius: 10px;
+  padding: 14px; margin-bottom: 14px; line-height: 1.7; white-space: pre-wrap;
+}
+
+.question-text { font-size: 16px; font-weight: 600; margin-bottom: 12px; line-height: 1.5; white-space: pre-wrap; }
+
+/* 36-39 / 40-44 savollar ichidagi | so'z | ramkalari uchun (admin kiritishda
+   | belgisi bilan ajratgan qismlar shu klass bilan avtomatik konvertatsiya
+   qilinadi, qarang: app.js -> renderFramedWords) */
+.framed-word {
+  display: inline-block; background: var(--blue-bg); color: #000;
+  font-weight: 700; border: 1px solid var(--blue); border-radius: 6px;
+  padding: 2px 8px; margin: 2px 3px;
+}
+
+/* 33-35 moslashtirish savoli uchun qiya + sariq fon */
+.matching-gap {
+  font-weight: 700; font-style: italic; background: var(--yellow-bg);
+  padding: 1px 6px; border-radius: 4px;
+}
+
+.options { display: flex; flex-direction: column; gap: 10px; }
+.option-btn {
+  background: #fff; color: #1a1a1a; border: 2px solid #dcdcdc;
+  border-radius: 10px; padding: 12px 14px; text-align: left; font-size: 15px;
+}
+.option-btn.selected { border-color: var(--blue); background: var(--blue-bg); }
+
+.matching-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.matching-table th, .matching-table td {
+  border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px;
+}
+.matching-select { width: 100%; padding: 6px; font-size: 14px; }
+
+.short-answer-input {
+  width: 100%; padding: 12px; font-size: 15px; border: 2px solid #dcdcdc;
+  border-radius: 10px;
+}
+
+.essay-textarea {
+  width: 100%; min-height: 260px; padding: 12px; font-size: 15px;
+  border: 2px solid #dcdcdc; border-radius: 10px; font-family: inherit;
+}
+.word-count { font-size: 13px; color: var(--gray); margin-top: 6px; }
+
+#nav-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; background: #fff;
+  border-top: 1px solid #e3e3e3; display: flex; justify-content: space-between;
+  align-items: center; padding: 10px 14px;
+}
+#progress { font-size: 13px; color: var(--gray); }
+
+.modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  display: flex; align-items: center; justify-content: center; z-index: 20;
+}
+.modal.hidden { display: none; }
+.modal-box {
+  background: #fff; border-radius: 12px; padding: 20px; max-width: 320px;
+  text-align: center;
+}
+.modal-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: center; }
+
+.review-item { background: #fff; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.review-item.correct { border-left: 5px solid var(--green); }
+.review-item.incorrect { border-left: 5px solid var(--red); }
+.review-explanation { color: var(--gray); font-size: 13px; margin-top: 6px; }
