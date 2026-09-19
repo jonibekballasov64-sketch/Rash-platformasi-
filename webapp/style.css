@@ -64,10 +64,19 @@ button:disabled { opacity: .4; cursor: default; }
 }
 .option-btn.selected { border-color: var(--blue); background: var(--blue-bg); }
 
-.matching-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.matching-table { width: 100%; border-collapse: collapse; margin-top: 6px; background: #fff; }
 .matching-table th, .matching-table td {
-  border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 14px;
+  border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 14px;
 }
+.matching-table td:first-child { text-align: left; font-weight: 600; }
+.matching-table th:first-child { text-align: left; }
+.letter-btn {
+  background: #fff; color: #1a1a1a; border: 2px solid #dcdcdc;
+  border-radius: 8px; width: 36px; height: 36px; padding: 0; font-weight: 700;
+}
+.letter-btn.selected { border-color: var(--blue); background: var(--blue-bg); color: var(--blue); }
+.matching-legend { margin-top: 14px; background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; font-size: 14px; }
+.matching-legend div { margin-bottom: 6px; }
 .matching-select { width: 100%; padding: 6px; font-size: 14px; }
 
 .short-answer-input {
@@ -95,7 +104,7 @@ button:disabled { opacity: .4; cursor: default; }
 .modal.hidden { display: none; }
 .modal-box {
   background: #fff; border-radius: 12px; padding: 20px; max-width: 320px;
-  text-align: center;
+  text-align: center; white-space: pre-wrap;
 }
 .modal-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: center; }
 
