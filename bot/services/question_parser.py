@@ -1,6 +1,6 @@
 """Admin savol matnlarini siz ko'rsatgan formatdan parse qilish.
 
-KIRITISH FORMATI (har biri botga ALOHIDA xabar sifatida yuboriladi):
+KIRITISH FORMATI (bulk rejimda bir nechtasi bitta xabarga jamlanishi mumkin):
 
 1-17 va 18-32 (bir tanlovli, A-D):
     ⁉️1. Savol matni (___ bo'sh joy bo'lishi mumkin)
@@ -11,14 +11,16 @@ KIRITISH FORMATI (har biri botga ALOHIDA xabar sifatida yuboriladi):
     ✅Javob: B
     ⚠️Izoh: izoh matni
 
-Matn (ilmiy/badiiy/g'azal), 18, 23, 28-savoldan OLDIN alohida xabar bilan:
+Matn (ilmiy/badiiy/g'azal), ‼️...‼️ bilan o'ralgan holda (istalgan joyda,
+uzun bo'lsa bir necha xabarga bo'linishi ham mumkin):
     ‼️
     matn birinchi qatori
     matn ikkinchi qatori
     ...
     ‼️
 
-33-35 (moslashtirish), BITTA xabarda:
+33-35 (moslashtirish), UCHALASI BITTA GURUH sifatida (istalgan boshqa
+savollar bilan aralashib ketmasin, lekin 33/34/35 bir-biriga yaqin kelsin):
     ⁉️33. birinchi gap
     ⁉️34. ikkinchi gap
     ⁉️35. uchinchi gap
@@ -50,6 +52,13 @@ Matn (ilmiy/badiiy/g'azal), 18, 23, 28-savoldan OLDIN alohida xabar bilan:
 Eslatma: emoji belgilar (⁉️🔷✅⚠️‼️) aniq shu ko'rinishda bo'lishi shart emas —
 pastdagi regexlar ularning variantlarini (masalan faqat "✅" yoki "✅️") ham
 qabul qiladi, lekin qator boshida turishi kerak.
+
+BULK (ko'p savolni bitta yoki bir nechta xabarga erkin taqsimlab yuborish)
+rejimi uchun quyida `question_order_no` va `classify_and_parse_block`
+funksiyalari bor — ular admin xabarlarini savol-bloklarga ajratish va har
+birini avtomatik tur bo'yicha (single/matching/short/twopart) aniqlab
+tegishli parserga yo'naltirish uchun ishlatiladi (qarang:
+bot/handlers/admin/create_test.py, CreateTest.collecting holati).
 """
 from __future__ import annotations
 
@@ -342,4 +351,43 @@ def parse_two_part_short(raw: str) -> ParsedTwoPartShort:
         part_b_text=parts["B"]["text"].strip(),
         part_b_answers=parts["B"]["answers"],
         part_b_explanation="\n".join(parts["B"]["explanation"]).strip() or None,
-      )
+    )
+
+
+# --- BULK rejimi uchun yordamchi funksiyalar --------------------------------- #
+
+def question_order_no(line: str) -> int | None:
+    """Qator '⁉️N. ...' ko'rinishida bo'lsa N ni qaytaradi, aks holda None."""
+    m = _QUESTION_HEAD.match(line)
+    return int(m.group(1)) if m else None
+
+
+def classify_and_parse_block(lines: list[str]):
+    """Bitta savol-blokini (qatorlar ro'yxati) turi bo'yicha aniqlab, tegishli
+    parserga yo'naltiradi.
+
+    Qaytaradi: (kind, parsed_object), kind in {"matching", "single", "twopart", "short"}.
+    Aniqlash tartibi:
+      1) Agar birinchi savol raqami 33/34/35 bo'lsa -> matching.
+      2) Agar blokda 🔷 belgili variant qatori bo'lsa -> single choice.
+      3) Agar blokda oddiy "A) ..." / "B) ..." (🔷siz) qatori bo'lsa -> two-part.
+      4) Aks holda -> short answer.
+    """
+    text = "\n".join(lines)
+    first_nonempty = next((ln for ln in lines if ln.strip() != ""), "")
+    order_no = question_order_no(first_nonempty)
+    if order_no is None:
+        raise ParseError(f"Blok '⁉️N. ...' bilan boshlanishi kerak: {first_nonempty[:60]!r}")
+
+    if order_no in (33, 34, 35):
+        return "matching", parse_matching(text)
+
+    has_diamond_option = any(re.match(r"^\s*🔷", ln) for ln in lines)
+    if has_diamond_option:
+        return "single", parse_single_choice(text)
+
+    has_subpart = any(_SUBPART_LINE.match(ln) for ln in lines)
+    if has_subpart:
+        return "twopart", parse_two_part_short(text)
+
+    return "short", parse_short_answer(text)
