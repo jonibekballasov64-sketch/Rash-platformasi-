@@ -28,6 +28,7 @@ kerak bo'lsa shu joyni boyitish kifoya, backend struktura o'zgarmaydi.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,8 @@ from bot.db.models import (
 )
 from bot.services.essay import NotConfiguredError, grade_essay
 from bot.services.scoring import MIN_ESSAY_WORDS
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Milliy Sertifikat Test WebApp API")
 app.add_middleware(
@@ -80,6 +83,17 @@ class AnswerIn(BaseModel):
 
 class EssayIn(BaseModel):
     text: str
+
+
+def _naive_utc(value: dt.datetime) -> dt.datetime:
+    """DB'dan timezone-aware yoki naive qaytishidan qat'i nazar, taqqoslash
+    uchun har doim naive (tzinfo'siz) UTC datetime qaytaradi. Buning aksi
+    (naive va aware datetime'larni to'g'ridan-to'g'ri solishtirish) Python'da
+    TypeError beradi va bu /finish endpointida 500 xatolikka olib kelishi
+    mumkin edi."""
+    if value.tzinfo is not None:
+        return value.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    return value
 
 
 def _check_answer(question: Question, sub_part: str | None, given: str) -> bool:
@@ -154,7 +168,7 @@ async def submit_answer(attempt_id: int, payload: AnswerIn) -> dict[str, Any]:
             raise HTTPException(404, "Urinish topilmadi")
         if attempt.status != AttemptStatus.IN_PROGRESS:
             raise HTTPException(400, "Bu urinish allaqachon yakunlangan")
-        if dt.datetime.utcnow() > attempt.deadline_at:
+        if dt.datetime.utcnow() > _naive_utc(attempt.deadline_at):
             raise HTTPException(400, "Vaqt tugagan")
 
         question_result = await session.execute(select(Question).where(Question.id == payload.question_id))
@@ -210,59 +224,69 @@ async def submit_essay_draft(attempt_id: int, payload: EssayIn) -> dict[str, Any
 @app.post("/api/attempt/{attempt_id}/finish")
 async def finish_attempt(attempt_id: int) -> dict[str, Any]:
     async with get_session() as session:
-        result = await session.execute(
-            select(Attempt)
-            .where(Attempt.id == attempt_id)
-            .options(
-                selectinload(Attempt.answers),
-                selectinload(Attempt.essay),
-                selectinload(Attempt.test),
+        try:
+            result = await session.execute(
+                select(Attempt)
+                .where(Attempt.id == attempt_id)
+                .options(
+                    selectinload(Attempt.answers),
+                    selectinload(Attempt.essay),
+                    selectinload(Attempt.test),
+                )
             )
-        )
-        attempt = result.scalar_one_or_none()
-        if attempt is None:
-            raise HTTPException(404, "Urinish topilmadi")
-        if attempt.status == AttemptStatus.FINISHED:
-            return {"already_finished": True}
+            attempt = result.scalar_one_or_none()
+            if attempt is None:
+                raise HTTPException(404, "Urinish topilmadi")
+            if attempt.status == AttemptStatus.FINISHED:
+                return {"already_finished": True}
 
-        was_expired = dt.datetime.utcnow() > attempt.deadline_at
-        attempt.status = AttemptStatus.EXPIRED if was_expired else AttemptStatus.FINISHED
-        attempt.finished_at = dt.datetime.utcnow()
+            was_expired = dt.datetime.utcnow() > _naive_utc(attempt.deadline_at)
+            attempt.status = AttemptStatus.EXPIRED if was_expired else AttemptStatus.FINISHED
+            attempt.finished_at = dt.datetime.utcnow()
 
-        raw_correct = sum(1 for a in attempt.answers if a.is_correct)
-        attempt.raw_correct_count = raw_correct
+            raw_correct = sum(1 for a in attempt.answers if a.is_correct)
+            attempt.raw_correct_count = raw_correct
 
-        essay_score_75 = None
-        if attempt.test.test_type == TestType.WITH_ESSAY:
-            essay_text = attempt.essay.text if attempt.essay else ""
-            try:
-                grade_result = await grade_essay(essay_text, attempt.test.essay_topic or "")
-                if attempt.essay is None:
-                    attempt.essay = EssayResponse(attempt_id=attempt.id, text=essay_text, word_count=0)
-                    session.add(attempt.essay)
-                attempt.essay.word_count = len([w for w in essay_text.split() if w.strip()])
-                attempt.essay.criteria_scores = grade_result.criteria_scores
-                attempt.essay.total_score_24 = grade_result.total_score_24
-                attempt.essay.converted_score_75 = grade_result.converted_score_75
-                attempt.essay.auto_reject_reason = grade_result.auto_reject_reason
-                attempt.essay.ai_feedback = grade_result.feedback
-                attempt.essay.scored_at = dt.datetime.utcnow()
-                essay_score_75 = grade_result.converted_score_75
-                attempt.essay_score_75 = essay_score_75
-            except NotConfiguredError:
-                # AI hali ulanmagan — esse matni saqlanadi, ball keyinroq
-                # admin tomonidan qo'lda ham kiritilishi mumkin
-                pass
+            essay_score_75 = None
+            if attempt.test.test_type == TestType.WITH_ESSAY:
+                essay_text = attempt.essay.text if attempt.essay else ""
+                try:
+                    grade_result = await grade_essay(essay_text, attempt.test.essay_topic or "")
+                    if attempt.essay is None:
+                        attempt.essay = EssayResponse(attempt_id=attempt.id, text=essay_text, word_count=0)
+                        session.add(attempt.essay)
+                    attempt.essay.word_count = len([w for w in essay_text.split() if w.strip()])
+                    attempt.essay.criteria_scores = grade_result.criteria_scores
+                    attempt.essay.total_score_24 = grade_result.total_score_24
+                    attempt.essay.converted_score_75 = grade_result.converted_score_75
+                    attempt.essay.auto_reject_reason = grade_result.auto_reject_reason
+                    attempt.essay.ai_feedback = grade_result.feedback
+                    attempt.essay.scored_at = dt.datetime.utcnow()
+                    essay_score_75 = grade_result.converted_score_75
+                    attempt.essay_score_75 = essay_score_75
+                except NotConfiguredError:
+                    # AI hali ulanmagan — esse matni saqlanadi, ball keyinroq
+                    # admin tomonidan qo'lda ham kiritilishi mumkin
+                    pass
 
-        await session.commit()
+            await session.commit()
 
-        return {
-            "status": attempt.status.value,
-            "raw_correct_count": raw_correct,
-            "total_questions": 44,
-            "essay_score_75": essay_score_75,
-            "note": "Daraja va yakuniy ball test yakunlangach EMAS, admin natijalarni e'lon qilganda chiqadi.",
-        }
+            return {
+                "status": attempt.status.value,
+                "raw_correct_count": raw_correct,
+                "total_questions": 44,
+                "essay_score_75": essay_score_75,
+                "note": "Daraja va yakuniy ball test yakunlangach EMAS, admin natijalarni e'lon qilganda chiqadi.",
+            }
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("finish_attempt xatosi (attempt_id=%s)", attempt_id)
+            raise HTTPException(
+                500,
+                f"Ichki xatolik yuz berdi (attempt_id={attempt_id}). Admin bilan bog'laning, "
+                "Railway loglarida batafsili xato ko'rsatilgan.",
+            )
 
 
 @app.get("/api/attempt/{attempt_id}/review")
@@ -306,4 +330,4 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             "rasch_score_75": attempt.rasch_score_75,
             "essay_score_75": attempt.essay_score_75,
             "items": items,
-                                                    }
+        }
