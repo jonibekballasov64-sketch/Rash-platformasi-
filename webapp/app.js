@@ -11,6 +11,7 @@ const attemptId = params.get("attempt_id");
 const state = {
   data: null,
   questions: [],
+  screens: [],
   currentIndex: 0,
   answers: {}, // key: `${question_id}:${sub_part||''}` -> given_answer
   essayText: "",
@@ -79,9 +80,32 @@ async function load() {
     return;
   }
   state.questions = state.data.questions;
+  state.screens = buildScreens(state.questions);
   state.deadline = new Date(state.data.deadline_at);
   startTimer();
   render();
+}
+
+// --- 33-35 kabi ketma-ket "matching" savollarni bitta ekranda (jadval
+// ko'rinishida) ko'rsatish uchun ularni bitta guruhga birlashtiradi.
+function buildScreens(questions) {
+  const screens = [];
+  let i = 0;
+  while (i < questions.length) {
+    const q = questions[i];
+    if (q.type === "matching") {
+      const group = [];
+      while (i < questions.length && questions[i].type === "matching") {
+        group.push(questions[i]);
+        i++;
+      }
+      screens.push({ kind: "matching_group", questions: group });
+    } else {
+      screens.push({ kind: "single", question: q });
+      i++;
+    }
+  }
+  return screens;
 }
 
 function startTimer() {
@@ -104,12 +128,12 @@ function startTimer() {
 }
 
 function totalScreens() {
-  // 44 savol + (agar with_essay bo'lsa) 1 ta esse ekrani
-  return state.questions.length + (state.data.test_type === "with_essay" ? 1 : 0);
+  // screens.length (33-35 bitta ekranga birlashtirilgan) + (with_essay bo'lsa) 1 ta esse ekrani
+  return state.screens.length + (state.data.test_type === "with_essay" ? 1 : 0);
 }
 
 function isEssayScreen(index) {
-  return state.data.test_type === "with_essay" && index === state.questions.length;
+  return state.data.test_type === "with_essay" && index === state.screens.length;
 }
 
 function render() {
@@ -123,7 +147,15 @@ function render() {
     return;
   }
 
-  const q = state.questions[idx];
+  const screen = state.screens[idx];
+
+  if (screen.kind === "matching_group") {
+    els.area.innerHTML = renderMatchingGroup(screen);
+    attachMatchingGroupHandlers(screen);
+    return;
+  }
+
+  const q = screen.question;
   let html = "";
   if (q.passage) {
     html += `<div class="passage-box">${applyInlineFormatting(escapeHtml(q.passage.text)).replace(/\n/g, "<br>")}</div>`;
@@ -132,8 +164,6 @@ function render() {
 
   if (q.type === "single_choice") {
     html += renderSingleChoice(q);
-  } else if (q.type === "matching") {
-    html += renderMatching(q);
   } else if (q.type === "short_answer") {
     html += renderShortAnswer(q, null);
   } else if (q.type === "two_part_short") {
@@ -145,6 +175,48 @@ function render() {
   attachHandlers(q);
 }
 
+// --- 33-35: PDF'dagi kabi bitta jadval — chapda gap, o'ngda A-F tugmalari.
+function renderMatchingGroup(screen) {
+  const qs = screen.questions;
+  const optionEntries = Object.entries(qs[0].options || {});
+
+  let html = '<div class="question-text">Quyidagi gaplarni to\'g\'ri javoblar bilan moslashtiring:</div>';
+  html += '<table class="matching-table"><thead><tr><th>Gap</th>';
+  for (const [letter] of optionEntries) {
+    html += `<th>${letter}</th>`;
+  }
+  html += "</tr></thead><tbody>";
+  for (const q of qs) {
+    const selected = state.answers[answerKey(q.id, null)] || "";
+    html += `<tr><td>${q.order_no}. ${renderFramedText(q.text)}</td>`;
+    for (const [letter] of optionEntries) {
+      const cls = selected === letter ? "letter-btn selected" : "letter-btn";
+      html += `<td><button type="button" class="${cls}" data-qid="${q.id}" data-letter="${letter}">${letter}</button></td>`;
+    }
+    html += "</tr>";
+  }
+  html += "</tbody></table>";
+
+  html += '<div class="matching-legend">';
+  for (const [letter, text] of optionEntries) {
+    html += `<div><strong>${letter})</strong> ${escapeHtml(text)}</div>`;
+  }
+  html += "</div>";
+  return html;
+}
+
+function attachMatchingGroupHandlers(screen) {
+  els.area.querySelectorAll(".letter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const qid = Number(btn.dataset.qid);
+      const letter = btn.dataset.letter;
+      state.answers[answerKey(qid, null)] = letter;
+      saveAnswer(qid, null, letter);
+      render();
+    });
+  });
+}
+
 function renderSingleChoice(q) {
   const selected = state.answers[answerKey(q.id, null)];
   let html = '<div class="options">';
@@ -153,21 +225,6 @@ function renderSingleChoice(q) {
     html += `<button class="${cls}" data-letter="${letter}">${letter}) ${text}</button>`;
   }
   html += "</div>";
-  return html;
-}
-
-function renderMatching(q) {
-  // 33-35 uchun: bu funksiya faqat bitta savolni ko'rsatadi (navigatsiya
-  // orqali), variantlar (A-F) select ko'rinishida.
-  const selected = state.answers[answerKey(q.id, null)] || "";
-  let html = `<div class="matching-gap" style="display:block;margin-bottom:10px;">${renderFramedText(q.text)}</div>`;
-  html += `<select class="matching-select" id="matching-select">`;
-  html += `<option value="">-- tanlang --</option>`;
-  for (const [letter, text] of Object.entries(q.options || {})) {
-    const sel = selected === letter ? "selected" : "";
-    html += `<option value="${letter}" ${sel}>${letter}) ${text}</option>`;
-  }
-  html += "</select>";
   return html;
 }
 
@@ -204,6 +261,20 @@ function renderEssayScreen() {
   });
 }
 
+// --- Yozma javob boshini avtomatik bosh harfga aylantiradi (ba'zi
+// telefon/keyboardlarda HTML autocapitalize ishlamasligi mumkin, shu sabab
+// buni qo'lda JS orqali ham ta'minlaymiz).
+function autoCapitalizeFirst(input) {
+  const value = input.value;
+  if (value.length === 0) return;
+  const capitalized = value.charAt(0).toUpperCase() + value.slice(1);
+  if (capitalized !== value) {
+    const pos = input.selectionStart;
+    input.value = capitalized;
+    if (pos !== null) input.setSelectionRange(pos, pos);
+  }
+}
+
 function attachHandlers(q) {
   if (q.type === "single_choice") {
     els.area.querySelectorAll(".option-btn").forEach((btn) => {
@@ -214,14 +285,9 @@ function attachHandlers(q) {
         render();
       });
     });
-  } else if (q.type === "matching") {
-    const select = document.getElementById("matching-select");
-    select.addEventListener("change", () => {
-      state.answers[answerKey(q.id, null)] = select.value;
-      saveAnswer(q.id, null, select.value);
-    });
   } else {
     els.area.querySelectorAll(".short-answer-input").forEach((input) => {
+      input.addEventListener("input", () => autoCapitalizeFirst(input));
       input.addEventListener("blur", () => {
         const sub = input.dataset.sub || null;
         state.answers[answerKey(q.id, sub)] = input.value;
@@ -243,17 +309,19 @@ async function saveAnswer(questionId, subPart, value) {
   }
 }
 
-function countUnanswered() {
-  let count = 0;
+function getUnansweredNumbers() {
+  const missing = [];
   for (const q of state.questions) {
     if (q.type === "two_part_short") {
-      if (!state.answers[answerKey(q.id, "A")]) count++;
-      if (!state.answers[answerKey(q.id, "B")]) count++;
+      const missingParts = [];
+      if (!state.answers[answerKey(q.id, "A")]) missingParts.push("A");
+      if (!state.answers[answerKey(q.id, "B")]) missingParts.push("B");
+      if (missingParts.length) missing.push(`${q.order_no} (${missingParts.join(", ")})`);
     } else {
-      if (!state.answers[answerKey(q.id, null)]) count++;
+      if (!state.answers[answerKey(q.id, null)]) missing.push(String(q.order_no));
     }
   }
-  return count;
+  return missing;
 }
 
 function showConfirm(text) {
@@ -285,9 +353,9 @@ els.nextBtn.addEventListener("click", async () => {
 els.finishBtn.addEventListener("click", requestFinish);
 
 async function requestFinish() {
-  const unanswered = countUnanswered();
-  const msg = unanswered > 0
-    ? `${unanswered} ta savolga belgilamagansiz. Haqiqatdan yakunlaysizmi?`
+  const missing = getUnansweredNumbers();
+  const msg = missing.length > 0
+    ? `Quyidagi savollarga javob belgilamagansiz: ${missing.join(", ")}.\n\nHaqiqatdan yakunlaysizmi?`
     : "Haqiqatdan yakunlaysizmi?";
   const ok = await showConfirm(msg);
   if (ok) finishTest(false);
