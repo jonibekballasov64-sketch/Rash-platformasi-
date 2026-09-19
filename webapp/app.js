@@ -43,11 +43,24 @@ async function api(path, options = {}) {
   return res.json();
 }
 
+function escapeHtml(text) {
+  return (text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+}
+
+// --- **qalin matn** -> <strong>, __qiya matn__ -> <em>. Matn avval escape
+// qilingan bo'lishi kerak (xom, admin kiritgan matnga qo'llanadi).
+function applyInlineFormatting(escaped) {
+  let out = escaped.replace(/\*\*([^*]+)\*\*/g, (_, t) => `<strong>${t}</strong>`);
+  out = out.replace(/__([^_]+)__/g, (_, t) => `<em>${t}</em>`);
+  return out;
+}
+
 // --- | so'z | ramkali qismlarni <span class="framed-word"> ga aylantiradi,
-// va oddiy | ...| bo'lmagan matnni o'zgartirmaydi.
+// **qalin** va __qiya__ belgilarni ham qo'llaydi, va oddiy shu belgilar
+// bo'lmagan matnni o'zgartirmaydi.
 function renderFramedText(text) {
-  const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
-  return escaped.replace(/\|([^|]+)\|/g, (_, word) => `<span class="framed-word">${word.trim()}</span>`);
+  const formatted = applyInlineFormatting(escapeHtml(text));
+  return formatted.replace(/\|([^|]+)\|/g, (_, word) => `<span class="framed-word">${word.trim()}</span>`);
 }
 
 function answerKey(qid, subPart) {
@@ -113,7 +126,7 @@ function render() {
   const q = state.questions[idx];
   let html = "";
   if (q.passage) {
-    html += `<div class="passage-box">${q.passage.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>")}</div>`;
+    html += `<div class="passage-box">${applyInlineFormatting(escapeHtml(q.passage.text)).replace(/\n/g, "<br>")}</div>`;
   }
   html += `<div class="question-text">${q.order_no}. ${renderFramedText(q.text)}</div>`;
 
