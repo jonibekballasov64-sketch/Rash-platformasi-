@@ -124,7 +124,7 @@ async def on_type_chosen(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(Command("holat"), StateFilter(CreateTest.collecting))
 async def cmd_status(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
-    have = sorted(data.get("questions", {}).keys())
+    have = sorted(int(k) for k in data.get("questions", {}).keys())
     missing = [n for n in range(1, TOTAL_QUESTIONS + 1) if n not in have]
     passages_count = len(data.get("passages", []))
     lines = [
@@ -153,7 +153,7 @@ async def cmd_finish(message: Message, state: FSMContext) -> None:
         )
         return
 
-    have = sorted(data.get("questions", {}).keys())
+    have = sorted(int(k) for k in data.get("questions", {}).keys())
     missing = [n for n in range(1, TOTAL_QUESTIONS + 1) if n not in have]
     if missing:
         await message.answer(
