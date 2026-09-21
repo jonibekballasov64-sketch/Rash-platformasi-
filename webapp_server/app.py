@@ -446,6 +446,7 @@ async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dic
 
             essay_score_75 = None
             essay_score_24 = None
+            essay_ai_problem: str | None = None
             if attempt.test.test_type == TestType.WITH_ESSAY:
                 essay_text = attempt.essay.text if attempt.essay else ""
                 try:
@@ -464,9 +465,19 @@ async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dic
                     essay_score_24 = grade_result.total_score_24
                     attempt.essay_score_75 = essay_score_75
                 except NotConfiguredError:
-                    # AI hali ulanmagan — esse matni saqlanadi, ball keyinroq
-                    # admin tomonidan qo'lda ham kiritilishi mumkin
-                    pass
+                    # AI hali ulanmagan (OPENAI_API_KEY shu webapp_server
+                    # servisida sozlanmagan) — esse matni saqlanadi, ball
+                    # keyinroq admin tomonidan qo'lda ham kiritilishi mumkin.
+                    # DIQQAT: webapp_server bot'dan ALOHIDA Railway servisi,
+                    # shu sabab OPENAI_API_KEY'ni shu servisning o'zida ham
+                    # (Variables bo'limida) alohida qo'yish kerak.
+                    essay_ai_problem = (
+                        "⚠️ OPENAI_API_KEY webapp servisida sozlanmagan — esse avtomatik "
+                        "tekshirilmadi. Railway'da 'affectionate-elegance' (webapp) "
+                        "servisining Variables bo'limiga OPENAI_API_KEY qo'shing, "
+                        "hozircha ball pastdagi \"✍️ ball kiritish\" tugmasi orqali "
+                        "qo'lda kiritilsin."
+                    )
                 except Exception:
                     # OpenAI vaqtincha ishlamasa (400/429/500 va h.k.) ham
                     # o'quvchi testni yakunlay olishi kerak — esse bali
@@ -474,6 +485,10 @@ async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dic
                     logger.exception(
                         "Esse AI baholashda xato (attempt_id=%s), test baribir yakunlanadi",
                         attempt_id,
+                    )
+                    essay_ai_problem = (
+                        "⚠️ Esse AI tekshiruvida xatolik yuz berdi (OpenAI javob bermadi). "
+                        "Ball pastdagi \"✍️ ball kiritish\" tugmasi orqali qo'lda kiritilsin."
                     )
             elif attempt.test.test_type == TestType.ONLY_44 and payload.manual_score is not None:
                 # 1-tur (ONLY_44) testda AI tekshiruvi yo'q — talabgor shu
@@ -548,6 +563,7 @@ async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dic
                 f"44 tadan: {raw_correct}/44\n"
                 f"Esse bali: {admin_essay_line}\n"
                 f"Urinish: {attempt.attempt_number}-marta{expired_note}"
+                + (f"\n\n{essay_ai_problem}" if essay_ai_problem else "")
             )
             for admin_id in settings.admin_id_list:
                 try:
@@ -587,8 +603,9 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             select(Attempt)
             .where(Attempt.id == attempt_id)
             .options(
-                selectinload(Attempt.answers).selectinload(Answer.question),
+                selectinload(Attempt.answers),
                 selectinload(Attempt.essay),
+                selectinload(Attempt.test).selectinload(Test.questions),
             )
         )
         attempt = result.scalar_one_or_none()
@@ -597,25 +614,41 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
         if attempt.status == AttemptStatus.IN_PROGRESS:
             raise HTTPException(400, "Test hali yakunlanmagan")
 
+        # Javob berilgan/berilmaganidan qat'i nazar TEST ICHIDAGI BARCHA
+        # savollarni ko'rsatish uchun (attempt.answers'da faqat javob
+        # berilganlar bor — shu sabab avval faqat javob berilganlar
+        # ko'rinib, javob belgilanmagan savollar butunlay yashirin qolgan
+        # edi), avval (question_id, sub_part) -> Answer lug'atini quramiz.
+        answers_by_key = {(a.question_id, a.sub_part): a for a in attempt.answers}
+
         items = []
-        for a in sorted(attempt.answers, key=lambda x: x.question.order_no):
-            q = a.question
-            explanation = q.explanation
-            if q.question_type == QuestionType.TWO_PART_SHORT and a.sub_part == "B":
-                explanation = q.part_b_explanation
-            items.append(
-                {
-                    "order_no": q.order_no,
-                    "sub_part": a.sub_part,
-                    "type": q.question_type.value,
-                    "question_text": q.text,
-                    "options": q.options,
-                    "given_answer": a.given_answer,
-                    "correct_option": q.correct_option,
-                    "is_correct": a.is_correct,
-                    "explanation": explanation,
-                }
-            )
+        for q in sorted(attempt.test.questions, key=lambda x: x.order_no):
+            sub_parts = ["A", "B"] if q.question_type == QuestionType.TWO_PART_SHORT else [None]
+            for sub_part in sub_parts:
+                a = answers_by_key.get((q.id, sub_part))
+                explanation = q.explanation
+                correct_answer_display = q.correct_option
+                if q.question_type == QuestionType.TWO_PART_SHORT and sub_part == "B":
+                    explanation = q.part_b_explanation
+                    correct_answer_display = ", ".join(q.part_b_accepted_answers or []) or None
+                elif q.question_type == QuestionType.TWO_PART_SHORT and sub_part == "A":
+                    correct_answer_display = ", ".join(q.accepted_answers or []) or None
+                elif q.question_type == QuestionType.SHORT_ANSWER:
+                    correct_answer_display = ", ".join(q.accepted_answers or []) or None
+                items.append(
+                    {
+                        "order_no": q.order_no,
+                        "sub_part": sub_part,
+                        "type": q.question_type.value,
+                        "question_text": q.text,
+                        "options": q.options,
+                        "given_answer": a.given_answer if a else None,
+                        "correct_option": q.correct_option,
+                        "correct_answer_display": correct_answer_display,
+                        "is_correct": a.is_correct if a else False,
+                        "explanation": explanation,
+                    }
+                )
 
         return {
             "final_score": attempt.final_score,
