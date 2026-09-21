@@ -75,6 +75,7 @@ async def serve_test_page() -> FileResponse:
 # Pydantic sxemalar
 # --------------------------------------------------------------------------- #
 
+
 class AnswerIn(BaseModel):
     question_id: int
     sub_part: str | None = None  # "A" yoki "B" (faqat 40-44 uchun)
@@ -118,6 +119,7 @@ def _check_answer(question: Question, sub_part: str | None, given: str) -> bool:
 # --------------------------------------------------------------------------- #
 # Endpointlar
 # --------------------------------------------------------------------------- #
+
 
 @app.get("/api/attempt/{attempt_id}")
 async def get_attempt(attempt_id: int) -> dict[str, Any]:
@@ -268,6 +270,14 @@ async def finish_attempt(attempt_id: int) -> dict[str, Any]:
                     # AI hali ulanmagan — esse matni saqlanadi, ball keyinroq
                     # admin tomonidan qo'lda ham kiritilishi mumkin
                     pass
+                except Exception:
+                    # OpenAI vaqtincha ishlamasa (400/429/500 va h.k.) ham
+                    # o'quvchi testni yakunlay olishi kerak — esse bali
+                    # keyinroq admin tomonidan qayta hisoblanishi mumkin.
+                    logger.exception(
+                        "Esse AI baholashda xato (attempt_id=%s), test baribir yakunlanadi",
+                        attempt_id,
+                    )
 
             await session.commit()
 
@@ -330,4 +340,4 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             "rasch_score_75": attempt.rasch_score_75,
             "essay_score_75": attempt.essay_score_75,
             "items": items,
-        }
+                }
