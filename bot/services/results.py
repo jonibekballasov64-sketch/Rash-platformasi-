@@ -1,10 +1,22 @@
 """Test natijalarini hisoblash va (admin bossa) talabgorlarga e'lon qilish.
 
-MUHIM: 44 ta test bali (Rasch) va sertifikat darajasi faqat ADMIN
-"Natijalarni yuborish" tugmasini bosgandagina barcha (shu paytgacha
-to'plangan) 1-urinishlar asosida QAYTA hisoblanadi va e'lon qilinadi — bu
-foydalanuvchi talabiga mos: "Daraja va umumiy natija test yakunlangach emas,
-men yuborganimda e'lon qilinadi".
+MUHIM (yangi tartib): "Natijalarni yangilash va yuborish" tugmasi bosilganda
+Rasch bali hisob-kitobi (item qiyinliklari) ANIQLIK uchun HAR DOIM shu
+paytgacha to'plangan BARCHA 1-urinishlar asosida qayta baholanadi — lekin bu
+qiymat faqat hali E'LON QILINMAGAN (Attempt.published_at hali bo'sh)
+urinishlarga YOZILADI va faqat ularga xabar yuboriladi. Bir marta e'lon
+qilingan (published_at to'ldirilgan) urinishning Rasch/yakuniy bali va
+darajasi shu zahoti "qulflanadi": undan keyin yana necha marta odam qo'shilib,
+tugma qayta bosilsa ham, o'sha urinish boshqa o'zgarmaydi va ikkinchi marta
+xabar bormaydi — foydalanuvchi talabiga mos: "Yangilash va natijani
+hisoblasam bossam, eski (allaqachon e'lon qilingan) natijalar hisobi
+tegilmasdan qoladi, faqat yangi qo'shilgan shaxslar hisoblanadi va yuboriladi".
+
+`mark_published=False` (masalan "Joriy natijani olish (fayl)" eksporti
+paytida) hali e'lon qilinmagan urinishlarning JORIY (tentativ) balini
+ko'rsatish uchun hisoblab bazaga yozadi, lekin published_at'ni TO'LDIRMAYDI —
+shu sabab bu urinishlar keyinroq haqiqiy "Natijalarni yangilash va
+yuborish"da baribir qayta hisoblanadi va e'lon qilinadi.
 
 TODO (keyingi bosqich): 2-urinishlar uchun (counts_for_rasch=False) item
 qiyinliklarini 1-urinishlardan meros qilib, faqat shu kishining o'z balini
@@ -12,6 +24,7 @@ hisoblash. Hozircha bu funksiya faqat 1-urinishlarni hisoblaydi.
 """
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -29,10 +42,18 @@ class PublishSummary:
     results: list[Attempt]
 
 
-async def recompute_test_results(session: AsyncSession, test_id: int) -> PublishSummary:
+async def recompute_test_results(
+    session: AsyncSession, test_id: int, mark_published: bool = False
+) -> PublishSummary:
     """Shu testning barcha 1-urinish (counts_for_rasch=True), yakunlangan
-    urinishlari uchun Rasch balini qayta hisoblab, Attempt.rasch_score_75 va
-    (esse bali mavjud bo'lsa) final_score/final_grade'ni yangilaydi."""
+    urinishlari orasidan HALI E'LON QILINMAGANLARI uchun Rasch balini qayta
+    hisoblab, Attempt.rasch_score_75 va (esse bali mavjud bo'lsa)
+    final_score/final_grade'ni yangilaydi. Allaqachon e'lon qilingan
+    (published_at to'ldirilgan) urinishlarga TEGILMAYDI.
+
+    mark_published=True bo'lsa (haqiqiy "Natijalarni yangilash va yuborish"
+    bosilganda), yangi hisoblangan urinishlarga published_at=hozir belgilanadi
+    va shundan keyin ular boshqa qayta hisoblanmaydi/qayta e'lon qilinmaydi."""
 
     result = await session.execute(
         select(Attempt)
@@ -47,6 +68,10 @@ async def recompute_test_results(session: AsyncSession, test_id: int) -> Publish
     if not attempts:
         return PublishSummary(total_attempts_scored=0, results=[])
 
+    # Item qiyinligini iloji boricha aniq baholash uchun kalibratsiyada
+    # BARCHA (eski e'lon qilingan + yangi) urinishlarning javoblari
+    # ishlatiladi — faqat natijani YOZISH va E'LON QILISH bosqichida
+    # allaqachon e'lon qilinganlar chetlab o'tiladi.
     responses: dict[int, dict[int, int]] = {}
     for attempt in attempts:
         answered = {
@@ -59,7 +84,11 @@ async def recompute_test_results(session: AsyncSession, test_id: int) -> Publish
 
     rasch = estimate_rasch(responses)
 
+    updated: list[Attempt] = []
     for attempt in attempts:
+        if attempt.published_at is not None:
+            continue  # allaqachon e'lon qilingan — qulflangan, tegilmaymiz
+
         score = rasch.person_scores_75.get(attempt.id)
         if score is None:
             continue
@@ -78,8 +107,13 @@ async def recompute_test_results(session: AsyncSession, test_id: int) -> Publish
             attempt.final_score = final
             attempt.final_grade = grade
 
+        if mark_published:
+            attempt.published_at = dt.datetime.utcnow()
+
+        updated.append(attempt)
+
     await session.commit()
-    return PublishSummary(total_attempts_scored=len(attempts), results=attempts)
+    return PublishSummary(total_attempts_scored=len(updated), results=updated)
 
 
 async def get_learner(session: AsyncSession, attempt: Attempt) -> LearnerUser:
