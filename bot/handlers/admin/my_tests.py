@@ -224,9 +224,15 @@ async def on_publish_results(callback: CallbackQuery, bot: Bot) -> None:
     await callback.answer("Hisoblanmoqda...")
 
     async with get_session() as session:
-        summary = await recompute_test_results(session, test_id)
+        # mark_published=True: faqat HALI E'LON QILINMAGAN urinishlar
+        # hisoblanadi va "qulflanadi" — avval e'lon qilingan kishilarning
+        # bali endi qayta o'zgarmaydi va ularga ikkinchi marta xabar
+        # yuborilmaydi, keyingi safar tugma bosilganda faqat YANGI
+        # qo'shilganlar hisoblab, e'lon qilinadi.
+        summary = await recompute_test_results(session, test_id, mark_published=True)
 
-        # Har bir hisoblangan urinish egasiga natija xabari yuboriladi
+        # Har bir YANGI hisoblangan (avval e'lon qilinmagan) urinish egasiga
+        # natija xabari yuboriladi
         sent = 0
         for attempt in summary.results:
             if attempt.final_score is None:
@@ -444,4 +450,4 @@ async def on_retry_essay(callback: CallbackQuery) -> None:
         f"{text}",
         reply_markup=keyboard,
         parse_mode="HTML",
-)
+        )
