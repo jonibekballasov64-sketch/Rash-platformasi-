@@ -5,9 +5,6 @@ alohida service sifatida deploy qilinadi):
     uvicorn webapp_server.app:app --host 0.0.0.0 --port $PORT
 
 Vazifasi:
-  - POST /api/register                       -> ism-familiya/test kodi/toifani
-        WebApp ichida qabul qilib, Attempt yaratadi (chatda so'rov yo'q).
-        Admin (ADMIN_IDS) uchun 2 martalik urinish chegarasi qo'llanilmaydi.
   - GET  /api/attempt/{attempt_id}          -> shu urinishga tegishli test
         tuzilishini (savollar, variantlar, passage'lar) TO'G'RI JAVOBLARSIZ
         qaytaradi, taymer uchun deadline bilan birga.
@@ -89,6 +86,11 @@ async def serve_register_page() -> FileResponse:
     return FileResponse(str(WEBAPP_DIR / "register.html"))
 
 
+@app.get("/review")
+async def serve_review_page() -> FileResponse:
+    return FileResponse(str(WEBAPP_DIR / "review.html"))
+
+
 # --------------------------------------------------------------------------- #
 # Pydantic sxemalar
 # --------------------------------------------------------------------------- #
@@ -101,6 +103,14 @@ class AnswerIn(BaseModel):
 
 class EssayIn(BaseModel):
     text: str
+
+
+class FinishIn(BaseModel):
+    # only_44 (1-tur) testlarda AI tekshiruvi yo'q — agar tashqarida
+    # tekshirilgan qo'shimcha/insho bali bo'lsa, talabgor shu yerda o'zi
+    # kiritishi mumkin (bo'sh qoldirsa, admin keyinroq /testlarim orqali
+    # qo'lda kiritadi).
+    manual_score: float | None = None
 
 
 class RegisterIn(BaseModel):
@@ -142,6 +152,36 @@ def _verify_init_data(init_data: str) -> dict[str, Any]:
     if not user_raw:
         raise HTTPException(401, "Foydalanuvchi ma'lumoti topilmadi")
     return _json.loads(user_raw)
+
+
+CATEGORY_LABELS = {
+    "filolog": "Filolog o'qituvchisi",
+    "boshlangich": "Boshlang'ich o'qituvchisi",
+    "abituriyent_asosiy": "Abituriyent (asosiy blok)",
+    "abituriyent_majburiy": "Abituriyent (majburiy blok)",
+}
+
+
+async def _send_telegram_message(
+    chat_id: int,
+    text: str,
+    parse_mode: str | None = None,
+    reply_markup: dict[str, Any] | None = None,
+) -> None:
+    """Bot'ning o'zi (aiogram) emas, to'g'ridan-to'g'ri Telegram HTTP API orqali
+    xabar yuboradi — webapp_server alohida jarayon bo'lgani uchun aiogram Bot
+    obyektiga ega emas. Yuborilmasa ham (bloklangan, chat topilmadi va h.k.)
+    testni yakunlash jarayoni to'xtamasligi kerak, shu sabab chaqiruvchi joyda
+    har doim try/except bilan o'raladi."""
+    url = f"https://api.telegram.org/bot{settings.bot_token}/sendMessage"
+    payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
 
 
 async def _is_group_member(user_id: int) -> bool:
@@ -246,8 +286,6 @@ async def register(payload: RegisterIn) -> dict[str, Any]:
         )
         attempts_so_far = count_result.scalar_one()
 
-        # Admin (ADMIN_IDS ro'yxatidagi Telegram ID'lar) uchun 2 martalik
-        # urinish chegarasi qo'llanilmaydi — cheksiz urinish mumkin.
         is_admin = telegram_id in settings.admin_id_list
         if not is_admin and attempts_so_far >= MAX_ATTEMPTS:
             raise HTTPException(
@@ -380,7 +418,7 @@ async def submit_essay_draft(attempt_id: int, payload: EssayIn) -> dict[str, Any
 
 
 @app.post("/api/attempt/{attempt_id}/finish")
-async def finish_attempt(attempt_id: int) -> dict[str, Any]:
+async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dict[str, Any]:
     async with get_session() as session:
         try:
             result = await session.execute(
@@ -390,6 +428,7 @@ async def finish_attempt(attempt_id: int) -> dict[str, Any]:
                     selectinload(Attempt.answers),
                     selectinload(Attempt.essay),
                     selectinload(Attempt.test),
+                    selectinload(Attempt.learner),
                 )
             )
             attempt = result.scalar_one_or_none()
@@ -406,6 +445,7 @@ async def finish_attempt(attempt_id: int) -> dict[str, Any]:
             attempt.raw_correct_count = raw_correct
 
             essay_score_75 = None
+            essay_score_24 = None
             if attempt.test.test_type == TestType.WITH_ESSAY:
                 essay_text = attempt.essay.text if attempt.essay else ""
                 try:
@@ -421,6 +461,7 @@ async def finish_attempt(attempt_id: int) -> dict[str, Any]:
                     attempt.essay.ai_feedback = grade_result.feedback
                     attempt.essay.scored_at = dt.datetime.utcnow()
                     essay_score_75 = grade_result.converted_score_75
+                    essay_score_24 = grade_result.total_score_24
                     attempt.essay_score_75 = essay_score_75
                 except NotConfiguredError:
                     # AI hali ulanmagan — esse matni saqlanadi, ball keyinroq
@@ -434,14 +475,98 @@ async def finish_attempt(attempt_id: int) -> dict[str, Any]:
                         "Esse AI baholashda xato (attempt_id=%s), test baribir yakunlanadi",
                         attempt_id,
                     )
+            elif attempt.test.test_type == TestType.ONLY_44 and payload.manual_score is not None:
+                # 1-tur (ONLY_44) testda AI tekshiruvi yo'q — talabgor shu
+                # yerda o'zi kiritgan qo'shimcha/insho balini saqlaymiz.
+                # Kiritmagan bo'lsa (None), admin keyinroq /testlarim orqali
+                # qo'lda kiritadi.
+                essay_score_75 = max(0.0, min(75.0, payload.manual_score))
+                attempt.essay_score_75 = essay_score_75
 
             await session.commit()
+
+            # --- Bot chatiga xabar: o'ziga (talabgorga) va barcha adminlarga ---
+            # Bu yerda hali yakuniy ball/daraja YO'Q (u admin "Natijalarni
+            # yuborish"ni bosganda hisoblanadi) — faqat "yakunlandi" xabari va
+            # xom natija (necha/44, esse bali agar tayyor bo'lsa) yuboriladi.
+            learner_name = attempt.learner.full_name if attempt.learner else "Noma'lum"
+            category_label = CATEGORY_LABELS.get(attempt.category.value, attempt.category.value)
+            expired_note = " (vaqt tugab avto-yakunlandi)" if was_expired else ""
+
+            essay_line = ""
+            if essay_score_75 is not None:
+                if essay_score_24 is not None:
+                    essay_line = f"Esse bali: {essay_score_24}/24 ({essay_score_75}/75)\n"
+                else:
+                    essay_line = f"Esse/qo'shimcha bali: {essay_score_75}/75\n"
+
+            student_text = (
+                f"✅ Test yakunlandi{expired_note}!\n\n"
+                f"44 tadan: {raw_correct}/44\n"
+                + essay_line
+                + "\nYakuniy ball va daraja test yakunlangach EMAS, ustoz natijalarni "
+                "e'lon qilganda shu botga xabar bo'lib keladi."
+            )
+
+            review_keyboard = None
+            if settings.webapp_base_url:
+                review_keyboard = {
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "📊 Javoblar va tahlilni ko'rish",
+                                "web_app": {
+                                    "url": f"{settings.webapp_base_url}/review?attempt_id={attempt.id}"
+                                },
+                            }
+                        ]
+                    ]
+                }
+
+            if attempt.learner is not None:
+                try:
+                    await _send_telegram_message(
+                        attempt.learner.telegram_id, student_text, reply_markup=review_keyboard
+                    )
+                except Exception:
+                    logger.exception(
+                        "Talabgorga yakunlash xabarini yuborishda xato (attempt_id=%s)", attempt_id
+                    )
+
+            if essay_score_75 is not None and essay_score_24 is not None:
+                admin_essay_line = f"{essay_score_24}/24 ({essay_score_75}/75)"
+            elif essay_score_75 is not None:
+                admin_essay_line = f"{essay_score_75}/75"
+            else:
+                admin_essay_line = "-"
+
+            admin_text = (
+                f"📥 <b>Yangi natija</b>\n\n"
+                f"Talabgor: {learner_name}\n"
+                f"Toifa: {category_label}\n"
+                f"Test kodi: {attempt.test.code}\n"
+                f"44 tadan: {raw_correct}/44\n"
+                f"Esse bali: {admin_essay_line}\n"
+                f"Urinish: {attempt.attempt_number}-marta{expired_note}"
+            )
+            for admin_id in settings.admin_id_list:
+                try:
+                    await _send_telegram_message(
+                        admin_id, admin_text, parse_mode="HTML", reply_markup=review_keyboard
+                    )
+                except Exception:
+                    logger.exception(
+                        "Adminga (%s) yakunlash xabarini yuborishda xato (attempt_id=%s)",
+                        admin_id,
+                        attempt_id,
+                    )
 
             return {
                 "status": attempt.status.value,
                 "raw_correct_count": raw_correct,
                 "total_questions": 44,
                 "essay_score_75": essay_score_75,
+                "essay_score_24": essay_score_24,
                 "note": "Daraja va yakuniy ball test yakunlangach EMAS, admin natijalarni e'lon qilganda chiqadi.",
             }
         except HTTPException:
@@ -482,7 +607,9 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
                 {
                     "order_no": q.order_no,
                     "sub_part": a.sub_part,
+                    "type": q.question_type.value,
                     "question_text": q.text,
+                    "options": q.options,
                     "given_answer": a.given_answer,
                     "correct_option": q.correct_option,
                     "is_correct": a.is_correct,
@@ -495,5 +622,6 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             "final_grade": attempt.final_grade,
             "rasch_score_75": attempt.rasch_score_75,
             "essay_score_75": attempt.essay_score_75,
+            "essay_score_24": attempt.essay.total_score_24 if attempt.essay else None,
             "items": items,
         }
