@@ -31,6 +31,7 @@ import datetime as dt
 import hashlib
 import hmac
 import logging
+import unicodedata
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl
@@ -248,7 +249,11 @@ async def register(payload: RegisterIn) -> dict[str, Any]:
             403, "Botdan foydalanish uchun avval belgilangan guruhga a'zo bo'lishingiz kerak."
         )
 
-    full_name = payload.full_name.strip()
+    # Ba'zi telefon klaviaturalari "chiroyli shrift" (stilize Unicode)
+    # belgilarini qo'yadi (masalan 𝑵𝑨𝑹𝑮𝑰𝒁𝑨 𝑶𝑳𝑰𝑴𝑶𝑽𝑵𝑨) — bular bazada,
+    # eksportda va admin xabarlarida chiroyli chiqmaydi. NFKC normalizatsiya
+    # ularni oddiy lotin/kirill harflariga aylantiradi.
+    full_name = unicodedata.normalize("NFKC", payload.full_name).strip()
     if len(full_name) < 3:
         raise HTTPException(400, "Iltimos, to'liq ism-familiyangizni kiriting.")
 
@@ -504,7 +509,11 @@ async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dic
             # Bu yerda hali yakuniy ball/daraja YO'Q (u admin "Natijalarni
             # yuborish"ni bosganda hisoblanadi) — faqat "yakunlandi" xabari va
             # xom natija (necha/44, esse bali agar tayyor bo'lsa) yuboriladi.
-            learner_name = attempt.learner.full_name if attempt.learner else "Noma'lum"
+            learner_name = (
+                unicodedata.normalize("NFKC", attempt.learner.full_name)
+                if attempt.learner and attempt.learner.full_name
+                else "Noma'lum"
+            )
             category_label = CATEGORY_LABELS.get(attempt.category.value, attempt.category.value)
             expired_note = " (vaqt tugab avto-yakunlandi)" if was_expired else ""
 
@@ -672,4 +681,4 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             "essay_score_75": attempt.essay_score_75,
             "essay_score_24": attempt.essay.total_score_24 if attempt.essay else None,
             "items": items,
-        }
+            }
