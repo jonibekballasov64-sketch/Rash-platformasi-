@@ -110,10 +110,11 @@ button:disabled { opacity: .4; cursor: default; }
 }
 .modal-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: center; }
 
-.review-item { background: #fff; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
-.review-item.correct { border-left: 5px solid var(--green); }
-.review-item.incorrect { border-left: 5px solid var(--red); }
-.review-explanation { color: var(--gray); font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
+/* Att.Diagnostika botidagi kabi: oddiy oq karta, chetida rangli chiziq yo'q */
+.review-item { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; border: 1px solid #e0e0e0; }
+.review-explanation { color: var(--gray); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+.review-answer-line { color: var(--green); font-weight: 700; margin-top: 10px; font-size: 15px; }
+.review-unanswered { color: var(--gray); font-size: 13px; margin-top: 6px; }
 
 .review-options { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
 .review-option {
