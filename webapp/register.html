@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ro'yxatdan o'tish</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div id="app">
+    <main id="question-area" style="padding-bottom:24px;">
+      <div id="reg-form">
+        <div class="question-text">Ism va familiyangiz</div>
+        <input id="full-name" class="short-answer-input" placeholder="Ism Familiya" autocapitalize="words" />
+
+        <div class="question-text" style="margin-top:18px;">Test kodi</div>
+        <input id="test-code" class="short-answer-input" placeholder="Masalan: AB12CD" autocapitalize="characters" />
+
+        <div class="question-text" style="margin-top:18px;">Toifangizni belgilang</div>
+        <div class="options" id="category-options">
+          <button type="button" class="option-btn" data-category="filolog">Filolog o'qituvchisi</button>
+          <button type="button" class="option-btn" data-category="boshlangich">Boshlang'ich o'qituvchisi</button>
+          <button type="button" class="option-btn" data-category="abituriyent_asosiy">Abituriyent (asosiy blok)</button>
+          <button type="button" class="option-btn" data-category="abituriyent_majburiy">Abituriyent (majburiy blok)</button>
+        </div>
+
+        <div id="reg-error" style="color:#d1293d; margin-top:14px; white-space:pre-wrap;"></div>
+
+        <button id="reg-submit" style="margin-top:20px; width:100%; padding:14px;">Davom etish</button>
+      </div>
+
+      <div id="reg-confirm" class="hidden" style="margin-top:10px;">
+        <div class="question-text" id="confirm-warning" style="white-space:pre-wrap;"></div>
+        <button id="reg-start-btn" style="margin-top:20px; width:100%; padding:14px;">🚀 Testni boshlash</button>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/register.js"></script>
+</body>
+</html>
