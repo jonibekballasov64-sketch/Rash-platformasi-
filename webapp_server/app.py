@@ -565,10 +565,25 @@ async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dic
                 f"Urinish: {attempt.attempt_number}-marta{expired_note}"
                 + (f"\n\n{essay_ai_problem}" if essay_ai_problem else "")
             )
+
+            # Esse AI tekshiruvida xatolik bo'lsa, FAQAT adminga (talabgorga
+            # emas) "Esseni qayta tekshirish" tugmasi ham qo'shiladi — esse
+            # matni bazada saqlanib qoladi (yo'qolmaydi), admin shu tugmani
+            # bosib qayta AI orqali baholatishi mumkin (bot/handlers/admin/
+            # my_tests.py -> on_retry_essay).
+            admin_keyboard = review_keyboard
+            if essay_ai_problem:
+                retry_button = {
+                    "text": "🔄 Esseni qayta tekshirish",
+                    "callback_data": f"retryessay:{attempt.id}",
+                }
+                base_rows = review_keyboard["inline_keyboard"] if review_keyboard else []
+                admin_keyboard = {"inline_keyboard": base_rows + [[retry_button]]}
+
             for admin_id in settings.admin_id_list:
                 try:
                     await _send_telegram_message(
-                        admin_id, admin_text, parse_mode="HTML", reply_markup=review_keyboard
+                        admin_id, admin_text, parse_mode="HTML", reply_markup=admin_keyboard
                     )
                 except Exception:
                     logger.exception(
