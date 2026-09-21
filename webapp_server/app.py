@@ -7,6 +7,7 @@ alohida service sifatida deploy qilinadi):
 Vazifasi:
   - POST /api/register                       -> ism-familiya/test kodi/toifani
         WebApp ichida qabul qilib, Attempt yaratadi (chatda so'rov yo'q).
+        Admin (ADMIN_IDS) uchun 2 martalik urinish chegarasi qo'llanilmaydi.
   - GET  /api/attempt/{attempt_id}          -> shu urinishga tegishli test
         tuzilishini (savollar, variantlar, passage'lar) TO'G'RI JAVOBLARSIZ
         qaytaradi, taymer uchun deadline bilan birga.
@@ -245,7 +246,10 @@ async def register(payload: RegisterIn) -> dict[str, Any]:
         )
         attempts_so_far = count_result.scalar_one()
 
-        if attempts_so_far >= MAX_ATTEMPTS:
+        # Admin (ADMIN_IDS ro'yxatidagi Telegram ID'lar) uchun 2 martalik
+        # urinish chegarasi qo'llanilmaydi — cheksiz urinish mumkin.
+        is_admin = telegram_id in settings.admin_id_list
+        if not is_admin and attempts_so_far >= MAX_ATTEMPTS:
             raise HTTPException(
                 400, "Siz bu testga allaqachon 2 marta urinib bo'lgansiz. Boshqa urinish mumkin emas."
             )
@@ -492,4 +496,4 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             "rasch_score_75": attempt.rasch_score_75,
             "essay_score_75": attempt.essay_score_75,
             "items": items,
-}
+        }
