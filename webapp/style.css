@@ -113,4 +113,12 @@ button:disabled { opacity: .4; cursor: default; }
 .review-item { background: #fff; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
 .review-item.correct { border-left: 5px solid var(--green); }
 .review-item.incorrect { border-left: 5px solid var(--red); }
-.review-explanation { color: var(--gray); font-size: 13px; margin-top: 6px; }
+.review-explanation { color: var(--gray); font-size: 13px; margin-top: 6px; white-space: pre-wrap; }
+
+.review-options { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.review-option {
+  border: 2px solid #dcdcdc; border-radius: 10px; padding: 10px 12px; font-size: 14px;
+  background: #fff; color: #1a1a1a;
+}
+.review-option.correct-answer { border-color: var(--green); background: #e3f8e9; }
+.review-option.wrong-selected { border-color: var(--red); background: #fdeaec; }
