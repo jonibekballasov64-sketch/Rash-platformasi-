@@ -3,6 +3,7 @@ ONLY_44 testlar uchun qo'lda ball (esse/qo'shimcha) kiritish, natijalarni
 talabgorlarga yuborish va joriy natijalarni Excel fayl qilib olish."""
 from __future__ import annotations
 
+import datetime as dt
 import tempfile
 from pathlib import Path
 
@@ -17,10 +18,28 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from bot.db.base import get_session
-from bot.db.models import AdminUser, Answer, Attempt, AttemptStatus, LearnerUser, Test
+from bot.db.models import (
+    AdminUser,
+    Answer,
+    Attempt,
+    AttemptStatus,
+    EssayResponse,
+    LearnerUser,
+    Test,
+    TestType,
+)
+from bot.services.essay import NotConfiguredError, grade_essay
 from bot.services.results import recompute_test_results
 
 router = Router(name="admin_my_tests")
+
+
+def _retry_keyboard(attempt_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Esseni qayta tekshirish", callback_data=f"retryessay:{attempt_id}")]
+        ]
+    )
 
 
 class EnterScore(StatesGroup):
@@ -325,3 +344,86 @@ async def on_export_results(callback: CallbackQuery, bot: Bot) -> None:
             BufferedInputFile(file_path.read_bytes(), filename=file_path.name),
             caption=f"📄 {test.title} ({test.code}) — {len(attempts)} kishining joriy natijasi.",
         )
+
+
+@router.callback_query(F.data.startswith("retryessay:"))
+async def on_retry_essay(callback: CallbackQuery) -> None:
+    """Esse AI tekshiruvi xato bergan bo'lsa (masalan OpenAI balans/limit
+    tugagan), admin shu tugmani bosib esseni qayta tekshirtiradi. Esse matni
+    bazada (EssayResponse.text) saqlanib turgani uchun hech qachon yo'qolmaydi
+    — faqat AI baholash bosqichi qayta ishga tushiriladi. Bu FAQAT adminga
+    ko'rinadigan tugma, talabgorga yubormaydi."""
+    attempt_id = int(callback.data.split(":", 1)[1])
+    await callback.answer("Esse qayta tekshirilmoqda...")
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(Attempt)
+            .where(Attempt.id == attempt_id)
+            .options(
+                selectinload(Attempt.essay),
+                selectinload(Attempt.test),
+                selectinload(Attempt.learner),
+            )
+        )
+        attempt = result.scalar_one_or_none()
+        if attempt is None:
+            await callback.message.answer("❌ Urinish topilmadi (o'chirilgan bo'lishi mumkin).")
+            return
+        if attempt.test.test_type != TestType.WITH_ESSAY:
+            await callback.message.answer("Bu test uchun esse tekshiruvi kerak emas.")
+            return
+
+        essay_text = attempt.essay.text if attempt.essay else ""
+        if not essay_text.strip():
+            await callback.message.answer(
+                "⚠️ Bu urinishda esse matni umuman saqlanmagan (talabgor yozmagan yoki "
+                "vaqt tugab bo'sh yakunlangan). Qayta tekshirishning ma'nosi yo'q — "
+                "ball \"✍️ ball kiritish\" orqali qo'lda kiritilsin."
+            )
+            return
+
+        try:
+            grade_result = await grade_essay(essay_text, attempt.test.essay_topic or "")
+        except NotConfiguredError:
+            await callback.message.answer(
+                "⚠️ OPENAI_API_KEY hali sozlanmagan (yoki noto'g'ri). Railway'dagi "
+                "webapp servisi (affectionate-elegance) Variables bo'limini tekshirib, "
+                "qayta urinib ko'ring.",
+                reply_markup=_retry_keyboard(attempt_id),
+            )
+            return
+        except Exception:
+            await callback.message.answer(
+                "⚠️ Esse AI tekshiruvida yana xatolik yuz berdi (masalan, OpenAI hisobida "
+                "balans/limit tugagan bo'lishi mumkin). Hisobni to'ldirib, birozdan so'ng "
+                "qayta urinib ko'ring — esse matni yo'qolmagan, saqlanib turibdi.",
+                reply_markup=_retry_keyboard(attempt_id),
+            )
+            return
+
+        if attempt.essay is None:
+            attempt.essay = EssayResponse(attempt_id=attempt.id, text=essay_text, word_count=0)
+            session.add(attempt.essay)
+        attempt.essay.word_count = len([w for w in essay_text.split() if w.strip()])
+        attempt.essay.criteria_scores = grade_result.criteria_scores
+        attempt.essay.total_score_24 = grade_result.total_score_24
+        attempt.essay.converted_score_75 = grade_result.converted_score_75
+        attempt.essay.auto_reject_reason = grade_result.auto_reject_reason
+        attempt.essay.ai_feedback = grade_result.feedback
+        attempt.essay.scored_at = dt.datetime.utcnow()
+        attempt.essay_score_75 = grade_result.converted_score_75
+        learner_name = attempt.learner.full_name if attempt.learner else "Noma'lum"
+        test_id = attempt.test_id
+        await session.commit()
+
+    text, keyboard = await _build_test_detail(test_id)
+    await callback.message.answer(
+        f"✅ <b>{learner_name}</b> uchun esse qayta tekshirildi!\n\n"
+        f"Esse bali: {grade_result.total_score_24}/24 ({grade_result.converted_score_75}/75)\n\n"
+        "Endi pastdagi \"🔄 Natijalarni yangilash va yuborish\" tugmasini bosib, "
+        "natijani talabgorga e'lon qiling.\n\n"
+        f"{text}",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
