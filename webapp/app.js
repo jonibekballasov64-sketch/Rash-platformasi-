@@ -11,10 +11,10 @@ const attemptId = params.get("attempt_id");
 const state = {
   data: null,
   questions: [],
-  screens: [],
   currentIndex: 0,
   answers: {}, // key: `${question_id}:${sub_part||''}` -> given_answer
   essayText: "",
+  manualScore: "", // faqat only_44 testlar uchun: o'zi/tashqarida qo'yilgan qo'shimcha ball
   deadline: null,
   timerInterval: null,
 };
@@ -128,12 +128,17 @@ function startTimer() {
 }
 
 function totalScreens() {
-  // screens.length (33-35 bitta ekranga birlashtirilgan) + (with_essay bo'lsa) 1 ta esse ekrani
-  return state.screens.length + (state.data.test_type === "with_essay" ? 1 : 0);
+  // screens.length (33-35 bitta ekranga birlashtirilgan) + qo'shimcha 1 ta ekran:
+  // with_essay -> esse yozish ekrani, only_44 -> qo'shimcha ball kiritish ekrani
+  return state.screens.length + (state.data.test_type === "with_essay" || state.data.test_type === "only_44" ? 1 : 0);
 }
 
 function isEssayScreen(index) {
   return state.data.test_type === "with_essay" && index === state.screens.length;
+}
+
+function isManualScoreScreen(index) {
+  return state.data.test_type === "only_44" && index === state.screens.length;
 }
 
 function render() {
@@ -144,6 +149,10 @@ function render() {
 
   if (isEssayScreen(idx)) {
     renderEssayScreen();
+    return;
+  }
+  if (isManualScoreScreen(idx)) {
+    renderManualScoreScreen();
     return;
   }
 
@@ -261,6 +270,23 @@ function renderEssayScreen() {
   });
 }
 
+// --- only_44 (1-tur) testlarda AI tekshiruvi yo'q, shu sabab agar
+// qo'shimcha/insho bali bo'lsa (tashqarida yozilgan bo'lsa), talabgorning
+// o'zi shu yerda kiritadi. Bo'sh qoldirsa, admin keyin /testlarim orqali
+// qo'lda kiritishi mumkin.
+function renderManualScoreScreen() {
+  els.area.innerHTML = `
+    <div class="question-text">45. Qo'shimcha (insho) bali</div>
+    <p style="color:#666;font-size:14px;">Agar sizda alohida tekshirilgan qo'shimcha/insho bali bo'lsa, shu yerga kiriting (0-75). Bo'lmasa yoki bilmasangiz, bo'sh qoldiring — ustoz keyinroq o'zi kiritadi.</p>
+    <input class="short-answer-input" id="manual-score-input" type="number" min="0" max="75" step="0.5"
+      placeholder="Masalan: 62" value="${state.manualScore}" />
+  `;
+  const input = document.getElementById("manual-score-input");
+  input.addEventListener("input", () => {
+    state.manualScore = input.value;
+  });
+}
+
 // --- Yozma javob boshini avtomatik bosh harfga aylantiradi (ba'zi
 // telefon/keyboardlarda HTML autocapitalize ishlamasligi mumkin, shu sabab
 // buni qo'lda JS orqali ham ta'minlaymiz).
@@ -363,16 +389,41 @@ async function requestFinish() {
 
 async function finishTest(auto) {
   clearInterval(state.timerInterval);
+  document.getElementById("nav-bar").style.display = "none";
+  els.finishBtn.disabled = true;
+
+  // --- Kutish ekrani: esse AI orqali tekshirilishi bir necha soniya
+  // olishi mumkin, shu payt oynani yopib qo'ymasligi uchun ogohlantiramiz.
+  if (state.data.test_type === "with_essay") {
+    els.area.innerHTML = `
+      <div class="question-text">⏳ Esse tekshirilmoqda...</div>
+      <p style="color:#666;">Iltimos, kuting va oynani yopmang. Bu bir necha soniya vaqt olishi mumkin.</p>
+    `;
+  } else {
+    els.area.innerHTML = `<div class="question-text">⏳ Yakunlanmoqda...</div>`;
+  }
+
+  const body = {};
+  if (state.data.test_type === "only_44" && state.manualScore !== "" && state.manualScore !== null) {
+    const parsed = Number(state.manualScore);
+    if (!Number.isNaN(parsed)) body.manual_score = parsed;
+  }
+
   try {
-    const result = await api(`/api/attempt/${attemptId}/finish`, { method: "POST" });
+    const result = await api(`/api/attempt/${attemptId}/finish`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
     els.area.innerHTML = `
       <div class="question-text">✅ Test yakunlandi${auto ? " (vaqt tugadi)" : ""}.</div>
       <p>44 tadan: <strong>${result.raw_correct_count ?? "-"}/44</strong></p>
-      ${state.data.test_type === "with_essay" ? `<p>Esse bali: <strong>${result.essay_score_75 ?? "hali kutilmoqda"}</strong></p>` : ""}
-      <p style="color:#666;font-size:13px;margin-top:14px;">Daraja va umumiy natija test yakunlangach emas, admin natijalarni e'lon qilganda chiqadi. Xabar shaxsiy botga yuboriladi.</p>
+      ${result.essay_score_75 !== null && result.essay_score_75 !== undefined ? `<p>Esse/qo'shimcha bali: <strong>${result.essay_score_24 !== null && result.essay_score_24 !== undefined ? `${result.essay_score_24}/24 (${result.essay_score_75}/75)` : `${result.essay_score_75}/75`}</strong></p>` : ""}
+      <p style="color:#666;font-size:13px;margin-top:14px;">Daraja va umumiy natija test yakunlangach emas, ustoz natijalarni e'lon qilganda chiqadi. Xabar shaxsiy botga yuboriladi.</p>
+      <button id="view-review-btn" style="margin-top:16px;width:100%;padding:14px;">📊 Javoblar va tahlilni ko'rish</button>
     `;
-    document.getElementById("nav-bar").style.display = "none";
-    els.finishBtn.disabled = true;
+    document.getElementById("view-review-btn").addEventListener("click", () => {
+      window.location.href = `/review?attempt_id=${attemptId}`;
+    });
   } catch (e) {
     els.area.innerHTML = `<p>Xatolik: ${e.message}</p>`;
   }
