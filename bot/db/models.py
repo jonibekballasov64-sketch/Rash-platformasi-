@@ -203,6 +203,14 @@ class Attempt(Base):
     final_score: Mapped[float | None] = mapped_column(nullable=True)  # (test+esse)/2
     final_grade: Mapped[str | None] = mapped_column(String(4), nullable=True)  # A+, A, B+, B, C+, C, "-"
 
+    # Admin "Natijalarni yangilash va yuborish"ni bosib, shu urinishga natija
+    # E'LON QILGANIDA to'ldiriladi. Shundan keyin bu urinishning Rasch/yakuniy
+    # bali "qulflanadi" — keyingi safar tugmani bosganda (yangi odamlar
+    # qo'shilgan bo'lsa ham) bu urinish QAYTA hisoblanmaydi va qayta xabar
+    # yuborilmaydi, faqat published_at hali bo'sh bo'lgan (yangi) urinishlar
+    # hisoblanadi va e'lon qilinadi. (services/results.py -> recompute_test_results)
+    published_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     test: Mapped[Test] = relationship(back_populates="attempts")
     learner: Mapped[LearnerUser] = relationship(back_populates="attempts")
     answers: Mapped[list["Answer"]] = relationship(back_populates="attempt", cascade="all, delete-orphan")
