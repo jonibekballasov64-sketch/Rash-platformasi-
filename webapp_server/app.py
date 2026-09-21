@@ -5,6 +5,8 @@ alohida service sifatida deploy qilinadi):
     uvicorn webapp_server.app:app --host 0.0.0.0 --port $PORT
 
 Vazifasi:
+  - POST /api/register                       -> ism-familiya/test kodi/toifani
+        WebApp ichida qabul qilib, Attempt yaratadi (chatda so'rov yo'q).
   - GET  /api/attempt/{attempt_id}          -> shu urinishga tegishli test
         tuzilishini (savollar, variantlar, passage'lar) TO'G'RI JAVOBLARSIZ
         qaytaradi, taymer uchun deadline bilan birga.
@@ -28,31 +30,41 @@ kerak bo'lsa shu joyni boyitish kifoya, backend struktura o'zgarmaydi.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import hmac
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from bot.config import settings
 from bot.db.base import get_session
 from bot.db.models import (
     Answer,
     Attempt,
     AttemptStatus,
+    Category,
     EssayResponse,
+    LearnerUser,
     Question,
     QuestionType,
     Test,
+    TestStatus,
     TestType,
 )
 from bot.services.essay import NotConfiguredError, grade_essay
 from bot.services.scoring import MIN_ESSAY_WORDS
+
+MAX_ATTEMPTS = 2
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +83,14 @@ async def serve_test_page() -> FileResponse:
     return FileResponse(str(WEBAPP_DIR / "index.html"))
 
 
+@app.get("/register")
+async def serve_register_page() -> FileResponse:
+    return FileResponse(str(WEBAPP_DIR / "register.html"))
+
+
 # --------------------------------------------------------------------------- #
 # Pydantic sxemalar
 # --------------------------------------------------------------------------- #
-
 
 class AnswerIn(BaseModel):
     question_id: int
@@ -84,6 +100,63 @@ class AnswerIn(BaseModel):
 
 class EssayIn(BaseModel):
     text: str
+
+
+class RegisterIn(BaseModel):
+    init_data: str
+    full_name: str
+    test_code: str
+    category: str
+
+
+# --------------------------------------------------------------------------- #
+# Telegram WebApp initData'ni tekshirish (ro'yxatdan o'tish uchun) — chatda
+# hech narsa so'ralmasdan, to'g'ridan-to'g'ri WebApp ichida ism/kod/toifa
+# olinganda, foydalanuvchi ID'sini Telegram tomonidan imzolangan holda
+# ishonchli tekshirish shart (aks holda telegram_id'ni soxtalashtirish mumkin
+# bo'lardi). Rasmiy algoritm:
+# https://core.telegram.org/bots/webapps#validating-data-received-via-the-web-app
+# --------------------------------------------------------------------------- #
+
+def _verify_init_data(init_data: str) -> dict[str, Any]:
+    try:
+        pairs = dict(parse_qsl(init_data, strict_parsing=True))
+    except ValueError:
+        raise HTTPException(401, "Noto'g'ri ma'lumot (init_data)")
+
+    received_hash = pairs.pop("hash", None)
+    if not received_hash:
+        raise HTTPException(401, "Tekshiruv ma'lumoti topilmadi")
+
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
+    secret_key = hmac.new(b"WebAppData", settings.bot_token.encode(), hashlib.sha256).digest()
+    computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(computed_hash, received_hash):
+        raise HTTPException(401, "Ma'lumot tasdiqlanmadi. Botni Telegram ichida qaytadan oching.")
+
+    import json as _json
+
+    user_raw = pairs.get("user")
+    if not user_raw:
+        raise HTTPException(401, "Foydalanuvchi ma'lumoti topilmadi")
+    return _json.loads(user_raw)
+
+
+async def _is_group_member(user_id: int) -> bool:
+    url = f"https://api.telegram.org/bot{settings.bot_token}/getChatMember"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                url, params={"chat_id": settings.allowed_group_id, "user_id": user_id}
+            )
+        data = resp.json()
+    except Exception:
+        return False
+    if not data.get("ok"):
+        return False
+    status = data["result"].get("status")
+    return status not in ("left", "kicked")
 
 
 def _naive_utc(value: dt.datetime) -> dt.datetime:
@@ -119,6 +192,85 @@ def _check_answer(question: Question, sub_part: str | None, given: str) -> bool:
 # --------------------------------------------------------------------------- #
 # Endpointlar
 # --------------------------------------------------------------------------- #
+
+@app.post("/api/register")
+async def register(payload: RegisterIn) -> dict[str, Any]:
+    """Ism-familiya / test kodi / toifani WebApp ichida qabul qilib, Attempt
+    yaratadi — bot chatida hech qanday savol-javob bo'lmaydi."""
+    tg_user = _verify_init_data(payload.init_data)
+    telegram_id = tg_user.get("id")
+    if telegram_id is None:
+        raise HTTPException(401, "Foydalanuvchi ID topilmadi")
+
+    if not await _is_group_member(telegram_id):
+        raise HTTPException(
+            403, "Botdan foydalanish uchun avval belgilangan guruhga a'zo bo'lishingiz kerak."
+        )
+
+    full_name = payload.full_name.strip()
+    if len(full_name) < 3:
+        raise HTTPException(400, "Iltimos, to'liq ism-familiyangizni kiriting.")
+
+    try:
+        category = Category(payload.category)
+    except ValueError:
+        raise HTTPException(400, "Noto'g'ri toifa tanlandi.")
+
+    code = payload.test_code.strip().upper()
+
+    async with get_session() as session:
+        test_result = await session.execute(select(Test).where(Test.code == code))
+        test = test_result.scalar_one_or_none()
+
+        if test is None or test.status == TestStatus.DRAFT:
+            raise HTTPException(404, "Bunday kod bilan test topilmadi. Qaytadan kiriting.")
+        if test.status == TestStatus.CLOSED:
+            raise HTTPException(400, "Bu test yopilgan, endi urinish qabul qilinmaydi.")
+
+        learner_result = await session.execute(
+            select(LearnerUser).where(LearnerUser.telegram_id == telegram_id)
+        )
+        learner = learner_result.scalar_one_or_none()
+        if learner is None:
+            learner = LearnerUser(telegram_id=telegram_id, full_name=full_name)
+            session.add(learner)
+            await session.flush()
+        else:
+            learner.full_name = full_name
+
+        count_result = await session.execute(
+            select(func.count(Attempt.id)).where(
+                Attempt.test_id == test.id, Attempt.learner_id == learner.id
+            )
+        )
+        attempts_so_far = count_result.scalar_one()
+
+        if attempts_so_far >= MAX_ATTEMPTS:
+            raise HTTPException(
+                400, "Siz bu testga allaqachon 2 marta urinib bo'lgansiz. Boshqa urinish mumkin emas."
+            )
+
+        attempt_number = attempts_so_far + 1
+        now = dt.datetime.utcnow()
+        attempt = Attempt(
+            test_id=test.id,
+            learner_id=learner.id,
+            category=category,
+            attempt_number=attempt_number,
+            counts_for_rasch=(attempt_number == 1),
+            status=AttemptStatus.IN_PROGRESS,
+            started_at=now,
+            deadline_at=now + dt.timedelta(minutes=test.duration_minutes),
+        )
+        session.add(attempt)
+        await session.commit()
+        await session.refresh(attempt)
+
+        return {
+            "attempt_id": attempt.id,
+            "attempt_number": attempt_number,
+            "duration_minutes": test.duration_minutes,
+        }
 
 
 @app.get("/api/attempt/{attempt_id}")
@@ -340,4 +492,4 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             "rasch_score_75": attempt.rasch_score_75,
             "essay_score_75": attempt.essay_score_75,
             "items": items,
-                }
+}
