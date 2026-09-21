@@ -68,25 +68,29 @@ function renderOptions(item) {
 
 function renderItem(item) {
   const answered = item.given_answer !== null && item.given_answer !== undefined && item.given_answer !== "";
-  const cls = item.is_correct ? "review-item correct" : "review-item incorrect";
-  const icon = item.is_correct ? "✅" : "❌";
   const label = item.sub_part ? `${item.order_no} (${item.sub_part})` : `${item.order_no}`;
   const hasOptions = (item.type === "single_choice" || item.type === "matching") && item.options;
 
-  let html = `<div class="${cls}">`;
-  html += `<div class="question-text">${icon} ${label}. ${renderFramedText(item.question_text)}</div>`;
+  // Att.Diagnostika botidagi ko'rinishga moslab: karta chetida qizil/yashil
+  // chiziq yo'q, sarlavhada ✅/❌ belgisi yo'q — faqat variantlar ichida
+  // ranglar (yashil = to'g'ri, qizil = xato belgilangan) va pastda doim
+  // "✅ Javob: <to'g'ri harf>" qatori (talabgor to'g'ri/xato javob
+  // berganidan qat'i nazar — bu shunchaki to'g'ri javobni ko'rsatadi).
+  let html = `<div class="review-item">`;
+  html += `<div class="question-text">${label}. ${renderFramedText(item.question_text)}</div>`;
 
   if (hasOptions) {
-    // Ranglar (yashil = to'g'ri, qizil = xato belgilangan) o'zi tushunarli —
-    // shu sabab variantlar ostiga alohida "Javob: X" qatori qo'shilmaydi.
     html += renderOptions(item);
+    if (item.correct_option) {
+      html += `<div class="review-answer-line">✅ Javob: <strong>${item.correct_option}</strong></div>`;
+    }
     if (!answered) {
-      html += `<div style="margin-top:6px;color:#666;">Siz bu savolga javob belgilamagansiz.</div>`;
+      html += `<div class="review-unanswered">Siz bu savolga javob belgilamagansiz.</div>`;
     }
   } else {
     html += `<div>Sizning javobingiz: <strong>${answered ? renderFramedText(item.given_answer) : "-"}</strong></div>`;
-    if (!item.is_correct && item.correct_answer_display) {
-      html += `<div>To'g'ri javob: <strong>${renderFramedText(item.correct_answer_display)}</strong></div>`;
+    if (item.correct_answer_display) {
+      html += `<div class="review-answer-line">✅ Javob: <strong>${renderFramedText(item.correct_answer_display)}</strong></div>`;
     }
   }
 
