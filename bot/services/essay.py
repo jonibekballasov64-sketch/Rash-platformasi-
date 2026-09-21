@@ -242,8 +242,14 @@ async def grade_with_openai(text: str, topic: str, word_count: int) -> EssayGrad
             "muhit o'zgaruvchisini qo'ying — boshqa hech narsa kerak emas."
         )
 
+    # Railway'da OPENAI_MODEL o'zgaruvchisi bo'sh qatorga o'rnatilgan bo'lsa ham
+    # (masalan avval yaratilgan-u to'ldirilmagan bo'lsa), OpenAI'ga bo'sh model
+    # nomi yuborilib "400 Bad Request" bermasligi uchun standart qiymatga
+    # qaytamiz.
+    model = settings.openai_model.strip() or "gpt-4o"
+
     payload = {
-        "model": settings.openai_model,
+        "model": model,
         "messages": _build_prompt(text, topic, word_count),
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
@@ -295,4 +301,4 @@ async def grade_with_openai(text: str, topic: str, word_count: int) -> EssayGrad
         converted_score_75=convert_essay_24_to_75(total_24),
         auto_reject_reason=None,
         feedback=data.get("feedback"),
-  )
+    )
