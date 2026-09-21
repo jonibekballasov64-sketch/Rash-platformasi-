@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 import tempfile
+import unicodedata
 from pathlib import Path
 
 from aiogram import Bot, F, Router
@@ -32,6 +33,15 @@ from bot.services.essay import NotConfiguredError, grade_essay
 from bot.services.results import recompute_test_results
 
 router = Router(name="admin_my_tests")
+
+
+def _clean_name(name: str | None) -> str:
+    """Bazada ilgari stilize Unicode shriftda saqlanib qolgan ismlarni ham
+    (yangi ro'yxatdan o'tishlar endi tozalangan holda saqlanadi, lekin eski
+    yozuvlar bazada o'zgarmagan) ko'rsatishda oddiy harflarga aylantiradi."""
+    if not name:
+        return "Noma'lum"
+    return unicodedata.normalize("NFKC", name)
 
 
 def _retry_keyboard(attempt_id: int) -> InlineKeyboardMarkup:
@@ -105,7 +115,7 @@ async def _build_test_detail(test_id: int) -> tuple[str, InlineKeyboardMarkup]:
         for a in finished[-10:]:
             score = a.final_score if a.final_score is not None else "hisoblanmagan"
             grade = a.final_grade or "-"
-            lines.append(f"  • {a.learner.full_name}: {score} ({grade})")
+            lines.append(f"  • {_clean_name(a.learner.full_name)}: {score} ({grade})")
     else:
         lines.append("Hali hech kim yakunlamagan.")
 
@@ -121,7 +131,7 @@ async def _build_test_detail(test_id: int) -> tuple[str, InlineKeyboardMarkup]:
         keyboard_rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"✍️ {a.learner.full_name} — ball kiritish",
+                    text=f"✍️ {_clean_name(a.learner.full_name)} — ball kiritish",
                     callback_data=f"setscore:{a.id}:{test_id}",
                 )
             ]
@@ -166,7 +176,7 @@ async def on_setscore_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(EnterScore.entering_score)
     await state.update_data(attempt_id=attempt_id, test_id=test_id)
     await callback.message.answer(
-        f"✍️ <b>{attempt.learner.full_name}</b> uchun ball kiriting (0 dan 75 gacha, "
+        f"✍️ <b>{_clean_name(attempt.learner.full_name)}</b> uchun ball kiriting (0 dan 75 gacha, "
         "masalan: 62 yoki 62.5):",
         parse_mode="HTML",
     )
@@ -270,6 +280,14 @@ async def on_export_results(callback: CallbackQuery, bot: Bot) -> None:
     await callback.answer("Fayl tayyorlanmoqda...")
 
     async with get_session() as session:
+        # Fayl "joriy natija"ni ko'rsatishi kerak — shuning uchun eksportdan
+        # oldin 44-test (Rasch) bali va (esse/qo'shimcha ball allaqachon
+        # kiritilgan bo'lsa) yakuniy ball/daraja QAYTA hisoblanadi. Bu faqat
+        # bazani yangilaydi — talabgorlarga hech narsa yuborilmaydi, e'lon
+        # qilish uchun baribir alohida "Natijalarni yangilash va yuborish"
+        # tugmasi bosiladi.
+        await recompute_test_results(session, test_id)
+
         test_result = await session.execute(select(Test).where(Test.id == test_id))
         test = test_result.scalar_one()
 
@@ -321,7 +339,7 @@ async def on_export_results(callback: CallbackQuery, bot: Bot) -> None:
         ws.append(
             [
                 i,
-                a.learner.full_name,
+                _clean_name(a.learner.full_name),
                 CATEGORY_LABELS.get(a.category.value, a.category.value),
                 a.attempt_number,
                 a.rasch_score_75 if a.rasch_score_75 is not None else "-",
@@ -413,7 +431,7 @@ async def on_retry_essay(callback: CallbackQuery) -> None:
         attempt.essay.ai_feedback = grade_result.feedback
         attempt.essay.scored_at = dt.datetime.utcnow()
         attempt.essay_score_75 = grade_result.converted_score_75
-        learner_name = attempt.learner.full_name if attempt.learner else "Noma'lum"
+        learner_name = _clean_name(attempt.learner.full_name if attempt.learner else None)
         test_id = attempt.test_id
         await session.commit()
 
@@ -426,4 +444,4 @@ async def on_retry_essay(callback: CallbackQuery) -> None:
         f"{text}",
         reply_markup=keyboard,
         parse_mode="HTML",
-    )
+)
