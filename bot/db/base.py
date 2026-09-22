@@ -26,6 +26,14 @@ async def init_db() -> None:
         await conn.execute(
             text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ")
         )
+        # Esse baholashning yangi batafsil (12 bandlik xatolar + ogohlantirish)
+        # tahlilini saqlash uchun keyinroq qo'shilgan ustunlar
+        await conn.execute(
+            text("ALTER TABLE essay_responses ADD COLUMN IF NOT EXISTS band_errors JSONB")
+        )
+        await conn.execute(
+            text("ALTER TABLE essay_responses ADD COLUMN IF NOT EXISTS warnings JSONB")
+        )
 
 
 @asynccontextmanager
