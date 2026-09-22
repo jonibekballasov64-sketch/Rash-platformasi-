@@ -1,20 +1,16 @@
 """Admin uchun /testlarim — yaratilgan testlar ro'yxati, joriy natijalar,
 ONLY_44 testlar uchun qo'lda ball (esse/qo'shimcha) kiritish, natijalarni
-talabgorlarga yuborish va joriy natijalarni Excel fayl qilib olish."""
+talabgorlarga yuborish va joriy natijalarni PDF fayl qilib olish."""
 from __future__ import annotations
 
 import datetime as dt
-import tempfile
 import unicodedata
-from pathlib import Path
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from openpyxl import Workbook
-from openpyxl.styles import Font
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -26,10 +22,12 @@ from bot.db.models import (
     AttemptStatus,
     EssayResponse,
     LearnerUser,
+    Question,
     Test,
     TestType,
 )
 from bot.services.essay import NotConfiguredError, grade_essay
+from bot.services.pdf_report import generate_results_pdf
 from bot.services.results import recompute_test_results
 
 router = Router(name="admin_my_tests")
@@ -279,9 +277,8 @@ CATEGORY_LABELS = {
 @router.callback_query(F.data.startswith("export:"))
 async def on_export_results(callback: CallbackQuery, bot: Bot) -> None:
     """Test yaratilgandan shu paytgacha uni ishlagan barcha talabgorlarning
-    natijasini (Ism, 44-test bali, esse/qo'shimcha bali, yakuniy ball, daraja,
-    xato belgilagan savollar) Excel faylga yig'ib, eng yaxshi natijadan
-    pastga qarab saralangan holda yuboradi."""
+    joriy natijasini (batafsil natijalar, savollar statistikasi va to'g'ri
+    javoblar kaliti — 3 bo'limli) PDF faylga yig'ib yuboradi."""
     test_id = int(callback.data.split(":", 1)[1])
     await callback.answer("Fayl tayyorlanmoqda...")
 
@@ -294,8 +291,15 @@ async def on_export_results(callback: CallbackQuery, bot: Bot) -> None:
         # tugmasi bosiladi.
         await recompute_test_results(session, test_id)
 
-        test_result = await session.execute(select(Test).where(Test.id == test_id))
+        test_result = await session.execute(
+            select(Test).where(Test.id == test_id).options(selectinload(Test.created_by))
+        )
         test = test_result.scalar_one()
+
+        questions_result = await session.execute(
+            select(Question).where(Question.test_id == test_id)
+        )
+        questions = list(questions_result.scalars().all())
 
         result = await session.execute(
             select(Attempt)
@@ -307,67 +311,19 @@ async def on_export_results(callback: CallbackQuery, bot: Bot) -> None:
         )
         attempts = list(result.scalars().all())
 
+        admin_name = _clean_name(test.created_by.full_name) if test.created_by else None
+
     if not attempts:
         await callback.message.answer("Hali hech kim bu testni yakunlamagan.")
         return
 
-    def sort_key(a: Attempt):
-        # Yakuniy ball bor bo'lsa shu bo'yicha, bo'lmasa xom to'g'ri javoblar
-        # soni bo'yicha, eng yaxshisi tepada bo'ladigan qilib saralaymiz.
-        primary = a.final_score if a.final_score is not None else -1
-        secondary = a.raw_correct_count if a.raw_correct_count is not None else -1
-        return (primary, secondary)
+    pdf_bytes = generate_results_pdf(test, attempts, questions, admin_name=admin_name)
 
-    attempts.sort(key=sort_key, reverse=True)
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Natijalar"
-    headers = [
-        "№",
-        "Ism-familiya",
-        "Toifa",
-        "Urinish",
-        "44-test bali (Rasch)",
-        "Esse/qo'shimcha bali",
-        "Yakuniy ball",
-        "Daraja",
-        "Xato belgilagan savollar",
-    ]
-    ws.append(headers)
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-
-    for i, a in enumerate(attempts, start=1):
-        wrong_numbers = sorted(
-            ans.question.order_no for ans in a.answers if ans.is_correct is False
-        )
-        ws.append(
-            [
-                i,
-                _clean_name(a.learner.full_name),
-                CATEGORY_LABELS.get(a.category.value, a.category.value),
-                a.attempt_number,
-                a.rasch_score_75 if a.rasch_score_75 is not None else "-",
-                a.essay_score_75 if a.essay_score_75 is not None else "-",
-                a.final_score if a.final_score is not None else "-",
-                a.final_grade or "-",
-                ", ".join(str(n) for n in wrong_numbers) if wrong_numbers else "-",
-            ]
-        )
-
-    for column_cells in ws.columns:
-        length = max(len(str(cell.value)) for cell in column_cells)
-        ws.column_dimensions[column_cells[0].column_letter].width = min(max(length + 2, 10), 60)
-
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        file_path = Path(tmp_dir) / f"{test.code}_natijalar.xlsx"
-        wb.save(file_path)
-        await bot.send_document(
-            callback.from_user.id,
-            BufferedInputFile(file_path.read_bytes(), filename=file_path.name),
-            caption=f"📄 {test.title} ({test.code}) — {len(attempts)} kishining joriy natijasi.",
-        )
+    await bot.send_document(
+        callback.from_user.id,
+        BufferedInputFile(pdf_bytes, filename=f"{test.code}_natijalar.pdf"),
+        caption=f"📄 {test.title} ({test.code}) — {len(attempts)} kishining joriy natijasi.",
+    )
 
 
 @router.callback_query(F.data.startswith("retryessay:"))
@@ -450,4 +406,4 @@ async def on_retry_essay(callback: CallbackQuery) -> None:
         f"{text}",
         reply_markup=keyboard,
         parse_mode="HTML",
-        )
+    )
