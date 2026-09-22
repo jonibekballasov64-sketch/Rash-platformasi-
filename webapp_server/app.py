@@ -681,4 +681,4 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             "essay_score_75": attempt.essay_score_75,
             "essay_score_24": attempt.essay.total_score_24 if attempt.essay else None,
             "items": items,
-        }
+    }
