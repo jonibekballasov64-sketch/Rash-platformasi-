@@ -629,7 +629,9 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             .options(
                 selectinload(Attempt.answers),
                 selectinload(Attempt.essay),
-                selectinload(Attempt.test).selectinload(Test.questions),
+                selectinload(Attempt.test)
+                .selectinload(Test.questions)
+                .selectinload(Question.passage),
             )
         )
         attempt = result.scalar_one_or_none()
@@ -665,6 +667,17 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
                         "sub_part": sub_part,
                         "type": q.question_type.value,
                         "question_text": q.text,
+                        # 18-22 (ilmiy), 23-27 (badiiy), 28-32 (g'azal) savollari
+                        # o'zi tegishli bo'lgan matnga (passage) bog'liq — tahlil
+                        # qilib qayta o'qish uchun review sahifasida ham shu matn
+                        # ko'rinishi kerak (avval bu maydon umuman yuborilmagan
+                        # edi, shu sabab ilmiy/badiiy/g'azal matni review'da
+                        # butunlay ko'rinmas edi).
+                        "passage": (
+                            {"type": q.passage.passage_type.value, "text": q.passage.text}
+                            if q.passage is not None
+                            else None
+                        ),
                         "options": q.options,
                         "given_answer": a.given_answer if a else None,
                         "correct_option": q.correct_option,
