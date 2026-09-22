@@ -250,8 +250,14 @@ class EssayResponse(Base):
     total_score_24: Mapped[float | None] = mapped_column(nullable=True)
     converted_score_75: Mapped[float | None] = mapped_column(nullable=True)
 
-    # Avtomatik rad etish sabablari: "mavzuga mos emas", "100 so'zdan kam", "ko'chirilgan", "yozilmagan"
+    # Avtomatik rad etish sabablari: "100 so'zdan kam", "yozilmagan"
     auto_reject_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Har bir band (1-12) bo'yicha AI topgan aniq xatolar ro'yxati,
+    # masalan {"1": ["Xato — to'g'risi: ..."], "2": ["Xatolik aniqlanmadi"], ...}
+    band_errors: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Ball kesmaydigan, faqat eslatma sifatidagi ogohlantirishlar ro'yxati
+    warnings: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     ai_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
     scored_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
