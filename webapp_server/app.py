@@ -60,7 +60,7 @@ from bot.db.models import (
     TestStatus,
     TestType,
 )
-from bot.services.essay import NotConfiguredError, grade_essay
+from bot.services.essay import NotConfiguredError, format_evaluation_messages, grade_essay
 from bot.services.scoring import MIN_ESSAY_WORDS
 
 MAX_ATTEMPTS = 2
@@ -452,6 +452,8 @@ async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dic
             essay_score_75 = None
             essay_score_24 = None
             essay_ai_problem: str | None = None
+            essay_text_for_dm: str | None = None
+            essay_detail_messages: list[str] = []
             if attempt.test.test_type == TestType.WITH_ESSAY:
                 essay_text = attempt.essay.text if attempt.essay else ""
                 try:
@@ -465,10 +467,14 @@ async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dic
                     attempt.essay.converted_score_75 = grade_result.converted_score_75
                     attempt.essay.auto_reject_reason = grade_result.auto_reject_reason
                     attempt.essay.ai_feedback = grade_result.feedback
+                    attempt.essay.band_errors = grade_result.band_errors
+                    attempt.essay.warnings = grade_result.warnings
                     attempt.essay.scored_at = dt.datetime.utcnow()
                     essay_score_75 = grade_result.converted_score_75
                     essay_score_24 = grade_result.total_score_24
                     attempt.essay_score_75 = essay_score_75
+                    essay_text_for_dm = essay_text
+                    essay_detail_messages = format_evaluation_messages(grade_result)
                 except NotConfiguredError:
                     # AI hali ulanmagan (OPENAI_API_KEY shu webapp_server
                     # servisida sozlanmagan) — esse matni saqlanadi, ball
@@ -556,6 +562,31 @@ async def finish_attempt(attempt_id: int, payload: FinishIn = FinishIn()) -> dic
                     logger.exception(
                         "Talabgorga yakunlash xabarini yuborishda xato (attempt_id=%s)", attempt_id
                     )
+
+                # Esse (2-tur) AI tomonidan muvaffaqiyatli tekshirilgan bo'lsa —
+                # talabgorning shaxsiy xabariga o'zi yozgan esse matnini va AI'ning
+                # 12 bandlik batafsil tahlilini (har band bali + aniq xatolar +
+                # ogohlantirish + umumiy izoh) alohida xabar(lar) qilib yuboramiz.
+                if essay_text_for_dm and essay_detail_messages:
+                    try:
+                        await _send_telegram_message(
+                            attempt.learner.telegram_id,
+                            "📝 Sizning esse matningiz:\n\n" + essay_text_for_dm,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Talabgorga esse matnini yuborishda xato (attempt_id=%s)", attempt_id
+                        )
+                    for msg_text in essay_detail_messages:
+                        try:
+                            await _send_telegram_message(
+                                attempt.learner.telegram_id, msg_text, parse_mode="HTML"
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Talabgorga esse batafsil tahlilini yuborishda xato (attempt_id=%s)",
+                                attempt_id,
+                            )
 
             if essay_score_75 is not None and essay_score_24 is not None:
                 admin_essay_line = f"{essay_score_24}/24 ({essay_score_75}/75)"
