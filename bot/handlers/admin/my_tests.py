@@ -26,7 +26,7 @@ from bot.db.models import (
     Test,
     TestType,
 )
-from bot.services.essay import NotConfiguredError, grade_essay
+from bot.services.essay import NotConfiguredError, format_evaluation_messages, grade_essay
 from bot.services.pdf_report import generate_results_pdf
 from bot.services.results import recompute_test_results
 
@@ -327,12 +327,13 @@ async def on_export_results(callback: CallbackQuery, bot: Bot) -> None:
 
 
 @router.callback_query(F.data.startswith("retryessay:"))
-async def on_retry_essay(callback: CallbackQuery) -> None:
+async def on_retry_essay(callback: CallbackQuery, bot: Bot) -> None:
     """Esse AI tekshiruvi xato bergan bo'lsa (masalan OpenAI balans/limit
     tugagan), admin shu tugmani bosib esseni qayta tekshirtiradi. Esse matni
     bazada (EssayResponse.text) saqlanib turgani uchun hech qachon yo'qolmaydi
     — faqat AI baholash bosqichi qayta ishga tushiriladi. Bu FAQAT adminga
-    ko'rinadigan tugma, talabgorga yubormaydi."""
+    ko'rinadigan tugma, talabgorga yubormaydi (biroq yangilangan batafsil
+    tahlil talabgorga alohida yuboriladi — birinchi tekshiruvdagi kabi)."""
     attempt_id = int(callback.data.split(":", 1)[1])
     await callback.answer("Esse qayta tekshirilmoqda...")
 
@@ -391,11 +392,23 @@ async def on_retry_essay(callback: CallbackQuery) -> None:
         attempt.essay.converted_score_75 = grade_result.converted_score_75
         attempt.essay.auto_reject_reason = grade_result.auto_reject_reason
         attempt.essay.ai_feedback = grade_result.feedback
+        attempt.essay.band_errors = grade_result.band_errors
+        attempt.essay.warnings = grade_result.warnings
         attempt.essay.scored_at = dt.datetime.utcnow()
         attempt.essay_score_75 = grade_result.converted_score_75
         learner_name = _clean_name(attempt.learner.full_name if attempt.learner else None)
+        learner_telegram_id = attempt.learner.telegram_id if attempt.learner else None
         test_id = attempt.test_id
         await session.commit()
+
+    # Qayta tekshirilgan esse bo'yicha yangilangan batafsil (12 bandlik) tahlilni
+    # talabgorning shaxsiy xabariga ham yuboramiz — birinchi tekshiruvdagi kabi.
+    if learner_telegram_id is not None:
+        for msg_text in format_evaluation_messages(grade_result):
+            try:
+                await bot.send_message(learner_telegram_id, msg_text, parse_mode="HTML")
+            except Exception:
+                pass
 
     text, keyboard = await _build_test_detail(test_id)
     await callback.message.answer(
@@ -406,4 +419,4 @@ async def on_retry_essay(callback: CallbackQuery) -> None:
         f"{text}",
         reply_markup=keyboard,
         parse_mode="HTML",
-    )
+                    )
