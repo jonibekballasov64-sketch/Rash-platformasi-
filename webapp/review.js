@@ -66,17 +66,32 @@ function renderOptions(item) {
   return html;
 }
 
+// 18-22 (ilmiy), 23-27 (badiiy), 28-32 (g'azal) savollari bir xil matnga
+// (passage) tegishli bo'ladi — shu matn har bir savolda emas, balki o'sha
+// guruhning FAQAT birinchi savolidan oldin bir marta ko'rsatiladi (aks holda
+// bir xil matn 5 marta takrorlanib ketardi). Buni aniqlash uchun ketma-ket
+// savollarning passage matnini solishtirib boramiz.
+let _lastPassageText = null;
+
 function renderItem(item) {
   const answered = item.given_answer !== null && item.given_answer !== undefined && item.given_answer !== "";
   const label = item.sub_part ? `${item.order_no} (${item.sub_part})` : `${item.order_no}`;
   const hasOptions = (item.type === "single_choice" || item.type === "matching") && item.options;
+
+  let html = "";
+  if (item.passage && item.passage.text !== _lastPassageText) {
+    html += `<div class="passage-box">${renderFramedText(item.passage.text)}</div>`;
+    _lastPassageText = item.passage.text;
+  } else if (!item.passage) {
+    _lastPassageText = null;
+  }
 
   // Att.Diagnostika botidagi ko'rinishga moslab: karta chetida qizil/yashil
   // chiziq yo'q, sarlavhada ✅/❌ belgisi yo'q — faqat variantlar ichida
   // ranglar (yashil = to'g'ri, qizil = xato belgilangan) va pastda doim
   // "✅ Javob: <to'g'ri harf>" qatori (talabgor to'g'ri/xato javob
   // berganidan qat'i nazar — bu shunchaki to'g'ri javobni ko'rsatadi).
-  let html = `<div class="review-item">`;
+  html += `<div class="review-item">`;
   html += `<div class="question-text">${label}. ${renderFramedText(item.question_text)}</div>`;
 
   if (hasOptions) {
@@ -114,6 +129,7 @@ async function load() {
       return;
     }
     let html = renderSummary(data);
+    _lastPassageText = null;
     for (const item of data.items) {
       html += renderItem(item);
     }
