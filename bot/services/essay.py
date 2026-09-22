@@ -5,10 +5,15 @@ Oqim:
        - yozilmagan / bo'sh -> 0 ball
        - 100 so'zdan kam -> 2 ball (avtomatik, tahlilsiz)
   2. Shu shartlarga tushmasa -> OpenAI'ga to'liq 12 bandli rasmiy mezon
-     (barcha 5 daraja tavsifi bilan) yuboriladi, u har bir band uchun
-     0/0.5/1/1.5/2 ball qo'yadi va mavzuga mosligini/ko'chirilganligini ham
-     baholaydi. 24 ballik yig'indi olinib, rasmiy jadval orqali 75 ballikka
+     (barcha 5 daraja tavsifi bilan) VA har bir band bo'yicha juda batafsil,
+     qattiq tekshiruv qoidalari (grammatik istisnolar, hallucination taqig'i,
+     "qora ro'yxat" va h.k.) yuboriladi. AI har bir banddan 0/0.5/1/1.5/2 ball
+     qo'yadi HAMDA har bir banddagi ANIQ xatolarni (mavjud bo'lsa) sanab
+     beradi. 24 ballik yig'indi olinib, rasmiy jadval orqali 75 ballikka
      o'tkaziladi (scoring.py).
+  3. Natija (har band bo'yicha ball + aniq xatolar + ogohlantirishlar +
+     umumiy izoh) `format_evaluation_messages()` orqali talabgorga
+     yuboriladigan tayyor HTML xabar(lar)ga aylantiriladi.
 
 Ishlatish uchun: Railway'da (yoki .env'da) OPENAI_API_KEY'ni qo'ying.
 Boshqa hech narsa sozlash shart emas — bu fayl to'g'ridan-to'g'ri
@@ -17,7 +22,7 @@ https://api.openai.com/v1/chat/completions'ga so'rov yuboradi.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -39,17 +44,17 @@ class NotConfiguredError(RuntimeError):
 class AutoRejectReason:
     NOT_WRITTEN = "yozilmagan"
     TOO_SHORT = "100 so'zdan kam"
-    OFF_TOPIC = "mavzuga mos emas"
-    PLAGIARIZED = "ko'chirilgan"
 
 
 @dataclass
 class EssayGradeResult:
-    criteria_scores: dict[str, float] | None  # None bo'lsa avto-rad qilingan
+    criteria_scores: dict[str, float] | None  # None bo'lsa avto-rad qilingan (yozilmagan/qisqa)
     total_score_24: float
     converted_score_75: int
     auto_reject_reason: str | None
-    feedback: str | None = None
+    feedback: str | None = None  # umumiy_izoh
+    band_errors: dict[str, list[str]] | None = None  # {"1": ["xato — to'g'risi: ..."], ...}
+    warnings: list[str] = field(default_factory=list)  # ball kesmaydigan ogohlantirishlar
 
 
 def count_words(text: str) -> int:
@@ -168,47 +173,162 @@ ESSE YOZILISHIGA QO'YILADIGAN TALABLAR (baholashda hisobga oling):
   - Esse uchun reja tuzilmaydi, epigraf qo'yilmaydi.
 """.strip()
 
+# Har bir band nomi — talabgorga yuboriladigan xabarda sarlavha sifatida ishlatiladi
+BAND_TITLES: dict[str, str] = {
+    "1": "Uslub",
+    "2": "Vaziyat yuzasidan qarashlar va shaxsiy fikr",
+    "3": "Dalillash",
+    "4": "Kirish/asosiy qism/xulosa",
+    "5": "Mantiqiy qurilish va xatboshilar",
+    "6": "Mantiqiy-mazmuniy izchillik",
+    "7": "Imlo",
+    "8": "Punktuatsiya",
+    "9": "Qo'shimcha qo'llash",
+    "10": "So'z qo'llash bilan bog'liq uslubiy xatolar",
+    "11": "Leksik xilma-xillik",
+    "12": "Sheva so'zlari, vulgarizm, varvarizm, parazit so'zlar",
+}
+
+# --------------------------------------------------------------------------- #
+# AI'ga yuboriladigan tizim ko'rsatmasi — juda batafsil, aniq va qattiq
+# tekshiruv qoidalari bilan (grammatik istisnolar, hallucination taqig'i,
+# hyperkorreksiya taqig'i va h.k.). "%%RUBRIC%%" o'rniga yuqoridagi
+# CRITERIA_RUBRIC matni qo'yiladi.
+# --------------------------------------------------------------------------- #
+_SYSTEM_TEMPLATE = """Sen O'zbekiston Milliy Sertifikat (Attestatsiya) tizimida ona tili va adabiyot fanidan yoziladigan ESSE (yozma ish)ni rasmiy mezon asosida baholovchi ekspertsan. Sen juda tajribali, ammo AYNI PAYTDA juda ANIQ, XOLIS va CHUQUR tahlil qiluvchi ekspertsan — hech qachon sust/yuzaki tekshiruv qilmaysan, hech qachon xato "o'ylab topmaysan" (hallucinate qilmaysan), faqat essening o'zida haqiqatan mavjud bo'lgan narsani xato deb belgilaysan. Har bir xatoni topganda "aynan shu so'z/jumlani shunday yozib xato qildingiz" tarzda ANIQ ko'rsating.
+
+Quyida to'liq rasmiy baholash mezoni berilgan:
+
+%%RUBRIC%%
+
+=== A) KIRISH QISMI TUZILISHI (1, 2, 4, 5-bandlar uchun muhim) ===
+
+To'g'ri kirish 3 qismdan iborat bo'lishi kerak:
+1. UMUMIY GAP — mavzu mavzusini umumiy tarzda tanishtiruvchi jumla. MUHIM: bu gap mavhum/mantiqsiz shiorlar bilan boshlanmasligi kerak — masalan "Zamin shiddat bilan rivojlanmoqda", "Globallashuv zamonida" kabi umumiy, mavzuga bevosita bog'lanmagan jumlalar bilan boshlanishi MANTIQIY XATO hisoblanadi. Bunday xatolarni 5-band (mantiqiy qurilish)da aniq ko'rsat.
+   Yaxshi namunalar: "Hozirda an'anaviy va zamonaviy [mavzu] masalasi kishilar orasida bahslarga sabab bo'lmoqda", "Bugungi kunda [mavzu] haqida turlicha fikrlar mavjud", "[Mavzu] hayotimizning ajralmas qismiga aylangan."
+2. MAVZUNI QAYTA ISHLASH (PARAFRAZ) — berilgan vaziyat matni/mavzusi so'zma-so'z ko'chirilmasdan, xuddi shu mazmunni boshqacha so'zlar va gap qurilishi bilan ifodalashi kerak. Agar talabgor mavzu matnini deyarli aynan ko'chirgan bo'lsa — buni 5-band yoki umumiy izohda ta'kidla.
+   MUHIM GRAMMATIK XATO: ikkala tomonni bog'lashda "sa" va "esa" qo'shimchasini BIRGA ishlatish xato (masalan "Ayrimlar telefon ijobiy desa, boshqalar esa foydali deydi" — bu noto'g'ri, chunki "desa" va "esa" ikkalasi ham qarama-qarshilik bildiruvchi vosita, ikkalasini birga ishlatish ortiqcha/noto'g'ri qurilish). To'g'ri variant: "Ayrimlar telefon ijobiy desa, boshqalar salbiy deydi" YOKI "Ayrimlar telefonni ijobiy deydi, boshqalar esa salbiy deydi" (faqat bittasi ishlatilsin). Bu xatoni albatta 5-band (gap qurilishi)da izlab top va ko'rsat.
+3. TEZIS (IXTIYORIY, majburiy emas — bo'lmasa xato emas) — masalan "Ushbu esseda shu haqida fikr yuritamiz", "Mazkur esseda shu haqida ko'rib chiqamiz" kabi.
+
+=== B) ASOSIY QISM TUZILISHI (2, 3, 4-bandlar uchun muhim) ===
+
+Asosiy qism kamida 3 ta xatboshidan iborat bo'lishi kerak (1-tomon fikri, 2-tomon fikri, shaxsiy fikr — yoki shunga yaqin taqsimot). Har bir band tahlilida quyidagilarni tekshir:
+
+- Xatboshi ochilishi (indent/yangi qatordan boshlanishi) borligini tekshir.
+- Xatboshi maqol bilan boshlansa — bu xato EMAS agar maqol mazmunga mos bo'lsa. Agar maqol mos kelmasa yoki sun'iy qo'shilgan bo'lsa, buni izchillik (6-band) xatosi sifatida ko'rsat.
+- Har bir tomon uchun avvalo QAYSI FIKR BOSHLANAYOTGANI haqida ishora bo'lishi kerak (masalan "Ayrimlar telefonni ijobiy deydi va fikrlarini quyidagicha dalillaydi" kabi kirish jumlasi). "Birinchidan, ikkinchidan" shart emas — "avvaliga", "keyingisi", "bundan tashqari" kabi so'zlar ham bo'ladi.
+- HAR BIR TOMON UCHUN QUYIDAGI STRUKTURANI QIDIR: FIKR (aniq da'vo/pozitsiya) + IZOH/SABAB (nima uchun shu fikr to'g'ri ekanini tushuntirish) + DALIL (buni tasdiqlovchi aniq isbot). Dalil quyidagilardan biri bo'lishi mumkin: statistika, tadqiqot natijasi, tajriba, mutaxassislar fikri, universitet tadqiqotlari, sayt/gazeta/jurnal ma'lumotlari, YOKI jamiyat hayotidan olingan hayotiy misol.
+  MUHIM: bitta tomon uchun BITTA yaxshi rivojlantirilgan fikr+izoh+dalil ZANJIRI YETARLI (2 ball uchun to'liq hisoblanadi), ikkitasi bo'lsa yanada yaxshi, lekin shart emas. Asosiysi — izchillik va mavzuga aloqadorlik.
+  Agar biror tomonda faqat FAKT/TAVSIF berilib (masalan "bu kanal 15 yildan buyon ishlaydi"), lekin bu FAKTNING NIMA UCHUN YAXSHI/FOYDALI ekanligi (fikr+izoh) ochib berilmagan bo'lsa — bu YETARLI DALIL EMAS, chunki shunchaki ma'lumot berilgan, mulohaza yuritilmagan. Bunday holatda 2-band va 3-bandda ballni pasaytir va buni aniq tushuntir.
+  ESLATMA: dalilning matn ichidagi joylashuvi qat'iy emas — muhimi, gap o'zidan oldingi gapga mantiqan bog'langan, izchil ekanligi. Statistik raqamning "haqiqiyligini" tekshirish shart emas — faqat uning matn ichida mantiqan o'rinli ishlatilganini bahola.
+
+=== C) SHAXSIY FIKR (2-band uchun) ===
+
+Shaxsiy fikr QISQA bo'lishi kerak — aniq BITTA tomon tanlanishi kifoya (masalan "Menimcha, ..."). Xohlasa 1-2 ta qisqa sabab qo'shishi mumkin, lekin bu shart emas. MUHIM: 3-band (dalillanganlik) mezoni FAQAT ikkala tomonning dalillariga tegishli — shaxsiy fikr uchun alohida dalil talab qilinmaydi, shaxsiy fikrning o'zi (aniq tomon tanlash) yetarli.
+
+=== D) XULOSA QISMI (2, 4-bandlar uchun) ===
+
+Xulosa maqol bilan boshlanishi mumkin (ixtiyoriy, bo'lmasa xato emas). MUHIM: xulosa NEYTRAL/BALANSLANGAN bo'lmasligi kerak — talabgor shaxsiy fikrida tanlagan tomonning ustunligini ANIQ va OCHIQ tarzda yozib yakunlashi kerak (masalan "har ikkala tarafning fikri o'rinli, lekin ... tomon ustunroq" kabi). Agar xulosa faqat ikkala tomonni tenglashtirib, hech qanday tomon afzalligini bildirmasdan tugasa — buni 2-band yoki umumiy izohda kamchilik sifatida ko'rsat.
+MUHIM ANIQLIK: xulosaning shaxsiy fikrda tanlangan tomon bilan MOS/O'XSHASH bo'lishi — bu XATO EMAS, aksincha TALAB QILINGAN va TO'G'RI holat. Buni 4-bandda yoki boshqa bandda kamchilik sifatida ko'rsatma. FAQAT agar xulosa va shaxsiy fikr bo'limlari SO'ZMA-SO'Z AYNAN bir xil gaplardan iborat bo'lsa — buni 6-band (fikrlar takrori)da xato sifatida ko'rsat, 4-bandda emas.
+
+=== E) SAVODXONLIK — CHUQUR VA QATTIQ TEKSHIRUV (7, 8, 9, 10-bandlar) ===
+
+Bu bandlarni SUST/YUZAKI emas, CHUQUR tekshir — har bir jumlani diqqat bilan o'qib chiq:
+- Imlo (7-band): so'zlarning noto'g'ri yozilishini top (apostrof variantlari bundan mustasno — pastda tushuntiriladi).
+- Punktuatsiya (8-band): vergul, nuqta, tire va boshqa belgilarning noto'g'ri/yetishmasligini top (vergüldan keyingi bo'shliq bundan mustasno). AYNIQSA tekshir: haqiqiy KIRISH SO'ZLARIDAN (modal/diskurs so'zlari — masalan "demak", "xullas", "afsuski", "shubhasiz", "albatta" kabi, gap boshida alohida mustaqil kirish sifatida kelganda) keyin vergul QO'YILISHI SHART.
+  MUHIM ISTISNO: "natijada", "oqibatda" kabi so'zlar odatiy RAVISH (ergash gap bo'lagi) sifatida ishlatilganda, ular kirish so'z EMAS — bunday hollarda ulardan keyin vergul talab qilinMAYDI, vergul bo'lmasligi XATO EMAS.
+- Qo'shimcha xatolari (9-band): kelishik qo'shimchalarining noto'g'ri ishlatilishini AYNIQSA diqqat bilan tekshir — masalan qaratqich/tushum kelishigi chalkashtirilishi keng tarqalgan xato: "ning" o'rniga "ni" ishlatilishi, yoki egalik qo'shimchasi xatosi.
+  MUHIM ISTISNO — IZOFA TURI 2: o'zbek tilida ikki ot yonma-yon kelib, birinchisi "-ning" qo'shimchasisiz umumiy/tur ma'nosini bildirishi TO'LIQ TO'G'RI — masalan "davlat bog'i", "shahar hokimi", "hudud ob-havosi" kabi qurilmalar TO'G'RI, ularga "-ning" YETISHMAYAPTI deb hech qachon xato qo'yma.
+- Uslubiy xato (10-band): so'zni noto'g'ri qo'llash, noo'rin takrorlash, ortiqcha qo'llash, tushirib qoldirish, bog'lovchi vositalar bilan bog'liq xato.
+  MUHIM — ORTIQCHA QATTIQQO'LLIKDAN SAQLAN (hyperkorreksiya taqiqlanadi): faqat haqiqiy xatoni xato deb ko'rsat. Agar asl ibora grammatik jihatdan to'g'ri va keng qo'llanadigan bo'lsa — buni faqat sen "yanada chiroyliroq" variant taklif qila olishing sababli xato deb ko'rsatish TAQIQLANADI.
+- Qo'pol, varvar, sheva so'zlarni AYNIQSA diqqat bilan qidir (12-band).
+
+=== F) IZCHILLIK VA MAVZUGA ALOQADORLIK (6-band) ===
+
+Har bir gap/xatboshi MAVZUGA bevosita aloqadorligini albatta tekshir. Agar biror gap mavzudan chetga chiqsa — buni 6-band (izchillik)da aniq xato sifatida ko'rsat.
+
+=== G) LEKSIK XILMA-XILLIK — KENGAYTIRILGAN MEZON (11-band) ===
+
+Sinonimlardan foydalanish, neologizm/o'zlashma so'zlarning o'rinli qo'llanishi, maqol/ibora/barqaror birikmalar — barchasi IJOBIY omil.
+
+=== H) MAXSUS HOLAT: 2 BALL BILAN BAHOLASH ===
+
+Agar esse to'liq mavzudan chetga chiqib ketgan bo'lsa YOKI talabgor mavzuni umuman tushunmagan bo'lib chiqsa — rasmiy mezonga ko'ra JAMI 2 BALL beriladi (barcha bandlar bo'yicha juda past ball qo'yish orqali).
+
+=== MUHIM QO'SHIMCHA QOIDALAR ===
+
+1) APOSTROF/HARF VARIANTLARI ("o'", "oʻ", "o'", "o'", "ŏ", "ò" va h.k., xuddi shunday "g'" variantlari) HECH QANDAY BANDDA XATO EMAS — bu qoida 1 dan 12 gacha BARCHA bandlarga taalluqli. Boshqa bandga yashirib jarima qilish ham TAQIQLANADI.
+
+1-B) TIRE VARIANTLARI ("-", "–", "—") HAM XATO EMAS — texnik farq.
+
+2) VERGULDAN KEYIN BO'SHLIQ YO'QLIGI hech qanday bandda ball kesmaydi.
+
+3) MAQOL/IBORA 1-bandga (uslub) TA'SIR QILMAYDI.
+
+4) XATONI TO'QIMA (hallucination qilma) — faqat real mavjud xatoni ko'rsat.
+
+5) BIR XIL XATO TAKRORLANSA — BITTA holat sifatida hisobla, "N marta takrorlangan" deb yoz.
+
+6) Har bandda MAVZUGA ALOQADORLIKNI tekshir.
+
+7) YAQIN SO'Z TAKRORI — 6 yoki 10-bandda ko'rsat.
+
+8) Gap bog'lovchi bilan mustaqil boshlansa — 5-bandda xato, qo'shma gap tavsiya etiladi.
+   MUHIM ISTISNO: "Chunki" bilan gap boshlanishi XATO EMAS — o'zbek tilida to'liq me'yoriy holat.
+
+10) IMLO (7-band) — MEXANIK TEKSHIRUV: har so'zni solishtir, xususan "fikr"→"fikir", "sabr"→"sabir", "umr"→"umur", "shukr"→"shukur", "hukm"→"hukum" kabi unli orttirish xatolarini qidir.
+
+11) O'ZINI TEKSHIRISH — MAJBURIY: har xatoni yozishdan oldin "essede aynan shu bormi?" deb so'ra, aks holda yozma.
+
+12) 8-bandda vergul-bo'shliqni umuman yozma.
+
+13) 3-BAND (DALILLANGANLIK) — ENG MUHIM TEKSHIRUV: ikkala tomonda FIKR+IZOH+DALIL borligini tekshir. Agar biror tomonda faqat FAKT SANAB O'TILGAN bo'lsa (masalan "bu telekanal N yildan buyon ishlaydi" — bu shunchaki tavsif, DALIL EMAS) — 3-bandga hech qachon to'liq 2 ball qo'yilmasin (kamida 1 yoki 1.5, holatga qarab pastroq).
+
+14) CHUQUR MANTIQIY-MAZMUNIY TEKSHIRUV: Har bir FIKR+IZOH+DALIL zanjirini tekshir:
+   a) FIKR mavzuning aynan shu tomoniga tegishlimi?
+   b) IZOH haqiqatan FIKRni oqlaydimi (sabab-natija bog'lanishi)?
+   c) DALIL aynan shu IZOHni tasdiqlaydimi?
+   d) Butun zanjir mantiqiy chiziqni saqlaydimi?
+   Uzilish bo'lsa — tegishli bandda (3, 5 yoki 6) ko'rsat.
+
+15) "GAP TOMONNI OCHISHGA XIZMAT QILMAYDI" TURIDAGI XATO — 6-BAND: Agar biror gap o'zi joylashgan xatboshidagi tomonni rivojlantirishga hech qanday hissa qo'shmasa — buni 6-band xatosi sifatida ko'rsat. Format: "'[gap]' jumlasi [1/2]-tomonni ochishga xizmat qilmaydi — bu gap mavzuga/tomonga aloqasiz yoki ortiqcha."
+
+=== YAKUNIY QORA RO'YXAT ===
+
+Javobni yuborishdan oldin tekshir — bular HECH QACHON paydo bo'lmasin: maqol sababli 1-band pasaytirilishi, vergul-bo'shliq xato deb ko'rsatilishi, harf variantlari xato deb ko'rsatilishi, "to'g'risi" asl so'z bilan bir xil bo'lishi, xulosa-shaxsiy fikr mosligi xato deb ko'rsatilishi, 3-bandga sust tekshirib to'liq ball berilishi, izofa turi 2 qurilmalariga "-ning" yetishmayapti deb xato ko'rsatilishi, "natijada"/"oqibatda"dan keyin vergul yo'qligi xato deb ko'rsatilishi, tutuq belgisi/tire variantlari xato deb ko'rsatilishi, 10-bandda faqat "chiroyliroq" bahonasi bilan xato ko'rsatilishi, "Chunki" bilan boshlangan gap xato deb ko'rsatilishi.
+
+=== JAVOB FORMATI ===
+
+Javobni FAQAT quyidagi JSON formatida qaytar, hech qanday qo'shimcha matn yozma:
+
+{
+  "bands": [
+    {"number": 1, "ball": 1.5, "xatolar": ["Xato — to'g'risi: tuzatilgan variant"]},
+    ... (1 dan 12 gacha, HAMMASI bo'lishi shart)
+  ],
+  "ogohlantirishlar": ["Ball kesmaydigan eslatmalar"],
+  "umumiy_izoh": "2-4 jumlalik umumiy xulosa"
+}
+
+- "ball": faqat 2, 1.5, 1, 0.5, 0.
+- Xato yo'q bo'lsa xatolar ro'yxatida "Xatolik aniqlanmadi" deb yoz.
+- Har xato 30 so'zdan oshmasin.
+- Javob HECH QACHON 12 banddan kam bo'lmasin."""
+
+SYSTEM_INSTRUCTIONS = _SYSTEM_TEMPLATE.replace("%%RUBRIC%%", CRITERIA_RUBRIC)
+
 
 def _build_prompt(text: str, topic: str, word_count: int) -> list[dict]:
-    system = (
-        "Siz Ona tili va adabiyot fanidan Milliy sertifikat imtihonidagi ESSE "
-        "(yozma ish)ni rasmiy 12 bandli mezon asosida baholaydigan tajribali "
-        "ekspertsiz. Faqat berilgan mezonga qat'iy amal qiling, boshqa hech "
-        "qanday mezondan foydalanmang. Har bir banddan aniq 0, 0.5, 1, 1.5 "
-        "yoki 2 ball qo'ying — oraliq boshqa qiymat yo'q. Natijani FAQAT "
-        "JSON ko'rinishida qaytaring, hech qanday qo'shimcha matn yozmang."
-    )
-    user = f"""MEZON:
-{CRITERIA_RUBRIC}
-
-ESSE MAVZUSI: {topic}
+    user = f"""ESSE MAVZUSI: {topic}
 
 TALABGOR YOZGAN ESSE MATNI ({word_count} so'z):
 \"\"\"
 {text}
 \"\"\"
 
-Vazifa:
-1. Avval tekshiring: esse berilgan mavzuga umuman aloqasi yo'qmi (off_topic)?
-   Yoki boshqa manbadan ko'chirilganga o'xshaydimi (plagiarized) — masalan
-   umumiy qabul qilingan, "andoza" formatidagi, shaxsiy fikr yo'q, shubhali
-   silliq matn bo'lsa shubha bildiring.
-2. Agar off_topic yoki plagiarized bo'lsa, criteria_scores'ni bo'sh ({{}})
-   qoldiring.
-3. Aks holda, yuqoridagi 12 bandning HAR BIRI bo'yicha alohida tahlil qilib,
-   0/0.5/1/1.5/2 ball qo'ying.
-4. Qisqa (2-3 gap) umumiy izoh yozing (feedback) — asosiy kuchli va zaif
-   tomonlarni ayting.
-
-Javobni FAQAT quyidagi JSON formatida qaytaring:
-{{
-  "off_topic": true yoki false,
-  "plagiarized": true yoki false,
-  "criteria_scores": {{"1": 2, "2": 1.5, "3": 1, "4": 2, "5": 1.5, "6": 2, "7": 1, "8": 1.5, "9": 2, "10": 1, "11": 1.5, "12": 2}},
-  "feedback": "qisqa umumiy izoh"
-}}"""
+Yuqoridagi barcha qoidalarga QAT'IY rioya qilib, esseni 12 band bo'yicha batafsil tahlil qil va FAQAT belgilangan JSON formatida javob ber."""
     return [
-        {"role": "system", "content": system},
+        {"role": "system", "content": SYSTEM_INSTRUCTIONS},
         {"role": "user", "content": user},
     ]
 
@@ -244,15 +364,19 @@ async def grade_with_openai(text: str, topic: str, word_count: int) -> EssayGrad
 
     # Railway'da OPENAI_MODEL o'zgaruvchisi bo'sh qatorga o'rnatilgan bo'lsa ham
     # (masalan avval yaratilgan-u to'ldirilmagan bo'lsa), OpenAI'ga bo'sh model
-    # nomi yuborilib "400 Bad Request" bermasligi uchun standart qiymatga
-    # qaytamiz.
-    model = settings.openai_model.strip() or "gpt-4o"
+    # nomi yuborilib "400 Bad Request" bermasligi uchun standart (arzon)
+    # qiymatga qaytamiz.
+    model = settings.openai_model.strip() or "gpt-4o-mini"
 
     payload = {
         "model": model,
         "messages": _build_prompt(text, topic, word_count),
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
+        # Xarajatni nazorat qilish uchun javob uzunligiga chegara — 12 band +
+        # xatolar + izohlar odatda bundan ancha kam sig'adi, lekin narxni
+        # nazoratsiz oshirib yubormasligi uchun xavfsizlik chegarasi qo'yamiz.
+        "max_tokens": 3000,
     }
     headers = {
         "Authorization": f"Bearer {settings.openai_api_key}",
@@ -267,38 +391,106 @@ async def grade_with_openai(text: str, topic: str, word_count: int) -> EssayGrad
     content = raw["choices"][0]["message"]["content"]
     data = json.loads(content)
 
-    if data.get("off_topic"):
-        return EssayGradeResult(
-            criteria_scores=None,
-            total_score_24=AUTO_REJECT_SCORE_24,
-            converted_score_75=convert_essay_24_to_75(AUTO_REJECT_SCORE_24),
-            auto_reject_reason=AutoRejectReason.OFF_TOPIC,
-            feedback=data.get("feedback"),
-        )
-    if data.get("plagiarized"):
-        return EssayGradeResult(
-            criteria_scores=None,
-            total_score_24=AUTO_REJECT_SCORE_24,
-            converted_score_75=convert_essay_24_to_75(AUTO_REJECT_SCORE_24),
-            auto_reject_reason=AutoRejectReason.PLAGIARIZED,
-            feedback=data.get("feedback"),
-        )
-
-    raw_scores: dict[str, float] = data.get("criteria_scores", {})
-    # Har bir bandni 0/0.5/1/1.5/2 ga eng yaqiniga yaxlitlab, xavfsizlik uchun
-    # 0-2 oralig'ida ushlab turamiz (model xato qiymat qaytarsa ham tizim yiqilmasin)
     allowed = [0, 0.5, 1, 1.5, 2]
     clean_scores: dict[str, float] = {}
-    for band in [str(i) for i in range(1, 13)]:
-        val = float(raw_scores.get(band, 0))
+    band_errors: dict[str, list[str]] = {}
+
+    for band_data in data.get("bands", []):
+        try:
+            number = str(int(band_data.get("number")))
+        except (TypeError, ValueError):
+            continue
+        if number not in [str(i) for i in range(1, 13)]:
+            continue
+        val = float(band_data.get("ball", 0) or 0)
         val = max(0.0, min(2.0, val))
-        clean_scores[band] = min(allowed, key=lambda a: abs(a - val))
+        clean_scores[number] = min(allowed, key=lambda a: abs(a - val))
+        errors = band_data.get("xatolar") or []
+        band_errors[number] = [str(e).strip() for e in errors if str(e).strip()] or ["Xatolik aniqlanmadi"]
+
+    # Modelning javobida biror band tushib qolgan bo'lsa ham tizim yiqilmasin —
+    # yetishmagan bandlarga 0 ball va ogohlantiruvchi izoh bilan to'ldiramiz.
+    for i in range(1, 13):
+        key = str(i)
+        if key not in clean_scores:
+            clean_scores[key] = 0.0
+            band_errors[key] = ["Model javobida bu band topilmadi (texnik xatolik)"]
 
     total_24 = round(sum(clean_scores.values()), 2)
+    warnings = [str(w).strip() for w in (data.get("ogohlantirishlar") or []) if str(w).strip()]
+
     return EssayGradeResult(
         criteria_scores=clean_scores,
         total_score_24=total_24,
         converted_score_75=convert_essay_24_to_75(total_24),
         auto_reject_reason=None,
-        feedback=data.get("feedback"),
+        feedback=data.get("umumiy_izoh"),
+        band_errors=band_errors,
+        warnings=warnings,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Talabgorga yuboriladigan batafsil (12 bandlik) natija xabari
+# --------------------------------------------------------------------------- #
+
+# Telegram xabar chegarasi 4096 belgi — xavfsizlik uchun pastroq chegara olamiz,
+# shunda bir nechta xabarga bo'linsa ham har biri kafolatlangan holda yetadi.
+_MAX_TG_MESSAGE_LEN = 3500
+
+
+def _escape_html(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def format_evaluation_messages(result: EssayGradeResult) -> list[str]:
+    """AI'ning 12 bandlik batafsil tahlilini (har band bali + aniq xatolari),
+    ogohlantirishlar va umumiy izohni talabgorga yuboriladigan tayyor HTML
+    xabar(lar)ga aylantiradi. Agar `criteria_scores` bo'sh bo'lsa (esse
+    yozilmagan yoki 100 so'zdan kam bo'lgani uchun avtomatik rad etilgan
+    bo'lsa), bo'sh ro'yxat qaytaradi — bunday holda batafsil tahlil yo'q."""
+    if not result.criteria_scores:
+        return []
+
+    blocks: list[str] = []
+    scores = result.criteria_scores
+    errors_map = result.band_errors or {}
+
+    for i in range(1, 13):
+        key = str(i)
+        title = BAND_TITLES.get(key, f"{key}-band")
+        ball = scores.get(key, 0)
+        errors = errors_map.get(key) or ["Xatolik aniqlanmadi"]
+        block = f"‼️ <b>{key}-band.</b> {_escape_html(title)}\n"
+        block += f"✅️ Ball: {ball} ball\n"
+        block += "⚠️ Tahlil:\n"
+        for err in errors:
+            block += f"— {_escape_html(err)}\n"
+        blocks.append(block)
+
+    summary = "📊 <b>Yakuniy natija:</b>\n"
+    summary += f"24 ballik tizimda: <b>{result.total_score_24} / 24</b>\n"
+    summary += f"75 ballik tizimda: <b>{result.converted_score_75} ball</b>\n"
+
+    if result.warnings:
+        summary += "\n🔔 <b>Ogohlantirish (ball kesilmagan, faqat eslatma):</b>\n"
+        for w in result.warnings:
+            summary += f"— {_escape_html(w)}\n"
+
+    if result.feedback:
+        summary += f"\n💬 {_escape_html(result.feedback)}"
+
+    blocks.append(summary)
+
+    # Bloklarni Telegram xabar uzunlik chegarasidan oshmaydigan qilib,
+    # imkon qadar kamroq xabarga guruhlab yig'amiz.
+    messages: list[str] = []
+    current = ""
+    for block in blocks:
+        if current and len(current) + len(block) + 1 > _MAX_TG_MESSAGE_LEN:
+            messages.append(current.strip())
+            current = ""
+        current += block + "\n"
+    if current.strip():
+        messages.append(current.strip())
+    return messages
