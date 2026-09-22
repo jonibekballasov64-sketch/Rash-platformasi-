@@ -15,9 +15,14 @@ class Settings(BaseSettings):
 
     database_url: str
 
-    # Esse'ni to'g'ridan-to'g'ri OpenAI orqali tekshirish uchun
+    # Esse'ni to'g'ridan-to'g'ri OpenAI orqali tekshirish uchun.
+    # gpt-4o-mini standart qilib qo'yilgan — gpt-4o'ga nisbatan ~15-16 marta
+    # arzon (deyarli bir xil sifatda JSON-rejimli tahlil beradi), shu sabab
+    # har bir esse tekshiruvi ancha kam pul sarflaydi. Xohlasangiz Railway'da
+    # OPENAI_MODEL o'zgaruvchisini qo'yib (masalan "gpt-4o") kuchliroq modelga
+    # o'tkazishingiz mumkin.
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o"
+    openai_model: str = "gpt-4o-mini"
 
     # O'quvchi test ishlaydigan Web App'ning ochiq (https) manzili, masalan
     # https://milliy-sertifikat-bot.up.railway.app
