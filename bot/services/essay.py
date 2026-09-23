@@ -443,12 +443,54 @@ def _escape_html(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+# --------------------------------------------------------------------------- #
+# 12 bandni rasmiy mezonning o'zidagi 5 ta tabiiy guruhga birlashtiramiz.
+# Talabgorga aniq band raqami/ball emas — guruh darajasida Yaxshi/O'rtacha/Zaif
+# ko'rsatiladi, chunki band-band aniq iqtibos (xato matnini keltirish) o'quvchi
+# tomonidan e'tirozlarga sabab bo'lyapti. Bu yerda ESSE MATNIDAN HECH QANDAY
+# IQTIBOS ishlatilmaydi — faqat qaysi guruhga ko'proq e'tibor kerakligi
+# umumiy tarzda ko'rsatiladi.
+# --------------------------------------------------------------------------- #
+_GROUPS: list[tuple[str, str, list[str]]] = [
+    ("1️⃣", "Topshiriq talablari (uslub, qarashlar, dalillash)", ["1", "2", "3"]),
+    ("2️⃣", "Matn yaxlitligi (kirish, asosiy qism, xulosa, mantiqiy qurilish)", ["4", "5", "6"]),
+    ("3️⃣", "Savodxonlik (imlo, punktuatsiya)", ["7", "8"]),
+    ("4️⃣", "Til birliklari uslubiyati", ["9", "10"]),
+    ("5️⃣", "Lug'at boyligi", ["11", "12"]),
+]
+
+
+def _group_label(avg: float) -> str:
+    if avg >= 1.6:
+        return "Yaxshi"
+    if avg >= 0.9:
+        return "O'rtacha"
+    return "Zaif"
+
+
+def _group_note(label: str, weak_titles: list[str]) -> str:
+    if label == "Yaxshi":
+        return "sezilarli kamchilik kuzatilmadi."
+    weak_part = ", ".join(weak_titles) if weak_titles else "ayrim jihatlar"
+    if label == "O'rtacha":
+        return f"asosan yaxshi, lekin {weak_part} bo'yicha ayrim kamchiliklar bor — shu qismlarga ko'proq e'tibor bering."
+    return f"{weak_part} bo'yicha jiddiy kamchiliklar bor — shu qismlarni qayta ko'rib chiqish tavsiya etiladi."
+
+
 def format_evaluation_messages(result: EssayGradeResult) -> list[str]:
-    """AI'ning 12 bandlik batafsil tahlilini (har band bali + aniq xatolari),
-    ogohlantirishlar va umumiy izohni talabgorga yuboriladigan tayyor HTML
-    xabar(lar)ga aylantiradi. Agar `criteria_scores` bo'sh bo'lsa (esse
-    yozilmagan yoki 100 so'zdan kam bo'lgani uchun avtomatik rad etilgan
-    bo'lsa), bo'sh ro'yxat qaytaradi — bunday holda batafsil tahlil yo'q."""
+    """AI'ning 12 bandlik tahlilini talabgorga yuboriladigan tayyor HTML
+    xabar(lar)ga aylantiradi.
+
+    Band-band aniq ball va essedan olingan iqtibos (xato matni) ko'rsatilmaydi
+    — bunday aniqlik talabgorlar tomonidan tez-tez e'tirozlarga sabab bo'lgan.
+    Buning o'rniga 12 band rasmiy mezonning o'zidagi 5 ta tabiiy guruhga
+    birlashtirilib, har biri uchun qisqa sifat bahosi (Yaxshi / O'rtacha /
+    Zaif) va bir jumlalik umumiy izoh beriladi. Oxirida 24 va 75 ballik
+    yakuniy natija hamda umumiy qisqa xulosa ko'rsatiladi.
+
+    Agar `criteria_scores` bo'sh bo'lsa (esse yozilmagan yoki 100 so'zdan kam
+    bo'lgani uchun avtomatik rad etilgan bo'lsa), bo'sh ro'yxat qaytaradi —
+    bunday holda batafsil tahlil yo'q."""
     if not result.criteria_scores:
         return []
 
@@ -456,29 +498,33 @@ def format_evaluation_messages(result: EssayGradeResult) -> list[str]:
     scores = result.criteria_scores
     errors_map = result.band_errors or {}
 
-    for i in range(1, 13):
-        key = str(i)
-        title = BAND_TITLES.get(key, f"{key}-band")
-        ball = scores.get(key, 0)
-        errors = errors_map.get(key) or ["Xatolik aniqlanmadi"]
-        block = f"‼️ <b>{key}-band.</b> {_escape_html(title)}\n"
-        block += f"✅️ Ball: {ball} ball\n"
-        block += "⚠️ Tahlil:\n"
-        for err in errors:
-            block += f"— {_escape_html(err)}\n"
-        blocks.append(block)
+    group_lines = ["📋 <b>Esse tahlili:</b>"]
+    for emoji, group_title, band_keys in _GROUPS:
+        vals = [scores.get(k, 0.0) for k in band_keys]
+        avg = sum(vals) / len(vals) if vals else 0.0
+        label = _group_label(avg)
+
+        weak_titles = []
+        for k in band_keys:
+            has_real_error = any(
+                e.strip().lower() != "xatolik aniqlanmadi" for e in (errors_map.get(k) or [])
+            )
+            if has_real_error or scores.get(k, 2.0) < 1.0:
+                weak_titles.append(BAND_TITLES.get(k, f"{k}-band"))
+
+        note = _group_note(label, weak_titles)
+        group_lines.append(
+            f"{emoji} {_escape_html(group_title)}: <b>{label}</b> — {_escape_html(note)}"
+        )
+
+    blocks.append("\n".join(group_lines))
 
     summary = "📊 <b>Yakuniy natija:</b>\n"
     summary += f"24 ballik tizimda: <b>{result.total_score_24} / 24</b>\n"
-    summary += f"75 ballik tizimda: <b>{result.converted_score_75} ball</b>\n"
-
-    if result.warnings:
-        summary += "\n🔔 <b>Ogohlantirish (ball kesilmagan, faqat eslatma):</b>\n"
-        for w in result.warnings:
-            summary += f"— {_escape_html(w)}\n"
+    summary += f"75 ballik tizimda: <b>{result.converted_score_75} ball</b>"
 
     if result.feedback:
-        summary += f"\n💬 {_escape_html(result.feedback)}"
+        summary += f"\n\n💬 {_escape_html(result.feedback)}"
 
     blocks.append(summary)
 
