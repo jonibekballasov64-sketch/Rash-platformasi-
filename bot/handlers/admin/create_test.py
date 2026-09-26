@@ -9,6 +9,11 @@ istalgan miqdorda (bittalab yoki bir nechtasini bittalashtirib) yubora oladi:
     o'zi tartiblab, saqlab boradi.
   - Uzun matnlar (ilmiy/badiiy/g'azal, ‼️...‼️) bitta xabarga sig'masa, bir
     necha xabarga bo'lib yuborilishi mumkin — bot ‼️ yopilguncha kutadi.
+  - Agar Telegram bitta savolning o'zini (masalan variantlarning bir qismini)
+    xabar uzunligi chegarasi tufayli avtomatik ravishda ikki xabarga bo'lib
+    yuborsa — bot buni xato deb hisoblamaydi, savol bloki tugallanmagan
+    bo'lsa uni saqlab qo'yib, keyingi xabar(lar)dagi davomi bilan avtomatik
+    ulaydi (xuddi ‼️...‼️ matnlar kabi).
   - Hammasi tayyor bo'lgach, admin /tugatdim buyrug'ini yuboradi. Bot 1-44
     barcha savollar va 3 ta matn borligini tekshiradi, WITH_ESSAY bo'lsa
     esse mavzusini so'raydi, keyin testni yakunlaydi.
@@ -104,6 +109,8 @@ async def on_type_chosen(callback: CallbackQuery, state: FSMContext) -> None:
         questions={},
         passages=[],
         open_passage_lines=None,
+        open_question_lines=None,
+        open_question_retries=0,
         essay_topic=None,
     )
     await state.set_state(CreateTest.collecting)
@@ -133,6 +140,11 @@ async def cmd_status(message: Message, state: FSMContext) -> None:
     ]
     if data.get("open_passage_lines") is not None:
         lines.append("⏳ Hozir bitta matn davom etmoqda (‼️ bilan hali yopilmagan).")
+    if data.get("open_question_lines") is not None:
+        lines.append(
+            "⏳ Bitta savol matni davom etmoqda (Telegram xabarni bo'lib yuborgan "
+            "bo'lishi mumkin) — davomini yuboring."
+        )
     if missing:
         lines.append("Yetishmayotgan savollar: " + ", ".join(map(str, missing)))
     else:
@@ -150,6 +162,14 @@ async def cmd_finish(message: Message, state: FSMContext) -> None:
         await message.answer(
             "❌ Bitta matn hali ‼️ bilan yopilmagan. Uni tugating (oxiriga ‼️ qo'ying), "
             "keyin qaytadan /tugatdim yuboring."
+        )
+        return
+
+    if data.get("open_question_lines") is not None:
+        await message.answer(
+            "❌ Bitta savol matni hali tugallanmagan (Telegram xabarni avtomatik "
+            "bo'lib yuborgan bo'lishi mumkin). Davomini yuboring, keyin qaytadan "
+            "/tugatdim bosing."
         )
         return
 
@@ -217,6 +237,14 @@ async def on_collecting_message(message: Message, state: FSMContext) -> None:
         data["open_passage_lines"] = None
         raw_lines = raw_lines[close_idx + 1:]
 
+    # 1b) Xuddi shunday — agar oldingi xabar TELEGRAM TOMONIDAN AVTOMATIK
+    #     BO'LIB YUBORILGANI sabab bitta savol bloki (masalan 6-savolning
+    #     variantlari) o'rtada uzilib qolgan bo'lsa, saqlab qo'yilgan
+    #     qatorlarni shu xabarning boshiga qo'shib, davom ettiramiz.
+    if data.get("open_question_lines") is not None:
+        raw_lines = data["open_question_lines"] + raw_lines
+        data["open_question_lines"] = None
+
     # 2) Qolgan qatorlarni savol-bloklarga va matnlarga ajratamiz.
     i = 0
     n = len(raw_lines)
@@ -253,8 +281,12 @@ async def on_collecting_message(message: Message, state: FSMContext) -> None:
             continue
 
         # Blok chegarasini topamiz: 33/34/35 birgalikda bitta blok, qolganlari
-        # navbatdagi "⁉️" yoki "‼️" gacha.
+        # navbatdagi "⁉️" yoki "‼️" gacha. Agar chegara (keyingi "⁉️"/"‼️")
+        # xabar oxirigacha topilmasa — bu blok ehtimol shu YERDA haqiqatan
+        # tugagan, YOKI Telegram xabarni avtomatik bo'lib yuborgani sabab
+        # o'rtada uzilib qolgan (reached_end=True quyida shuni belgilaydi).
         j = i + 1
+        reached_end = False
         if order_no in (33, 34, 35):
             while j < n:
                 nxt = qp.question_order_no(raw_lines[j])
@@ -263,6 +295,8 @@ async def on_collecting_message(message: Message, state: FSMContext) -> None:
                 if nxt is not None and nxt not in (33, 34, 35):
                     break
                 j += 1
+            else:
+                reached_end = True
         else:
             while j < n:
                 if raw_lines[j].strip() == "‼️":
@@ -270,14 +304,40 @@ async def on_collecting_message(message: Message, state: FSMContext) -> None:
                 if qp.question_order_no(raw_lines[j]) is not None:
                     break
                 j += 1
+            else:
+                reached_end = True
 
         block_lines = raw_lines[i:j]
         try:
             kind, parsed = qp.classify_and_parse_block(block_lines)
         except qp.ParseError as e:
+            retries = data.get("open_question_retries", 0)
+            if reached_end and retries < 5:
+                # Xabar Telegram tomonidan avtomatik bo'lib yuborilgan bo'lishi
+                # mumkin (masalan variantlarning bir qismi keyingi xabarda
+                # kelgan) — xato deb hisoblamasdan, davomini kutamiz.
+                data["open_question_lines"] = block_lines
+                data["open_question_retries"] = retries + 1
+                await state.set_data(data)
+                if replies:
+                    await message.answer("\n".join(replies))
+                if errors:
+                    await message.answer("\n".join(errors))
+                await message.answer(
+                    f"⏳ {order_no}-savol matni davom etmoqda (xabar Telegram "
+                    "tomonidan avtomatik bo'lib yuborilgan bo'lishi mumkin). "
+                    "Davomini keyingi xabar(lar)da yuboring — bot ularni "
+                    "avtomatik ulaydi."
+                )
+                return
+            # Haqiqiy formatlash xatosi (yoki bir necha marta ulashga urinib
+            # ham hal bo'lmagan blok) — endi to'g'ridan-to'g'ri xato ko'rsatamiz.
+            data["open_question_retries"] = 0
             errors.append(f"❌ {order_no}-savol atrofida xato: {e}")
             i = j
             continue
+
+        data["open_question_retries"] = 0
 
         if kind == "matching":
             for qn in parsed.order_nos:
