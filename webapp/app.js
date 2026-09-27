@@ -176,7 +176,7 @@ function render() {
   } else if (q.type === "short_answer") {
     html += renderShortAnswer(q, null);
   } else if (q.type === "two_part_short") {
-    html += `<p><strong>A)</strong></p>` + renderShortAnswer(q, "A");
+    html += `<p><strong>A) ${renderFramedText(q.part_a_text || "")}</strong></p>` + renderShortAnswer(q, "A");
     html += `<p style="margin-top:16px"><strong>B) ${renderFramedText(q.part_b_text || "")}</strong></p>` + renderShortAnswer(q, "B");
   }
 
