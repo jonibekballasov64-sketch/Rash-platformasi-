@@ -346,6 +346,7 @@ async def get_attempt(attempt_id: int) -> dict[str, Any]:
             if q.question_type in (QuestionType.SINGLE_CHOICE, QuestionType.MATCHING):
                 item["options"] = q.options
             if q.question_type == QuestionType.TWO_PART_SHORT:
+                item["part_a_text"] = q.part_a_text
                 item["part_b_text"] = q.part_b_text
             questions_payload.append(item)
 
@@ -685,11 +686,14 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
                 a = answers_by_key.get((q.id, sub_part))
                 explanation = q.explanation
                 correct_answer_display = q.correct_option
+                question_text = q.text
                 if q.question_type == QuestionType.TWO_PART_SHORT and sub_part == "B":
                     explanation = q.part_b_explanation
                     correct_answer_display = ", ".join(q.part_b_accepted_answers or []) or None
+                    question_text = (q.text + "\n\n" + (q.part_b_text or "")).strip()
                 elif q.question_type == QuestionType.TWO_PART_SHORT and sub_part == "A":
                     correct_answer_display = ", ".join(q.accepted_answers or []) or None
+                    question_text = (q.text + "\n\n" + (q.part_a_text or "")).strip()
                 elif q.question_type == QuestionType.SHORT_ANSWER:
                     correct_answer_display = ", ".join(q.accepted_answers or []) or None
                 items.append(
@@ -697,7 +701,7 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
                         "order_no": q.order_no,
                         "sub_part": sub_part,
                         "type": q.question_type.value,
-                        "question_text": q.text,
+                        "question_text": question_text,
                         # 18-22 (ilmiy), 23-27 (badiiy), 28-32 (g'azal) savollari
                         # o'zi tegishli bo'lgan matnga (passage) bog'liq — tahlil
                         # qilib qayta o'qish uchun review sahifasida ham shu matn
@@ -725,4 +729,4 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             "essay_score_75": attempt.essay_score_75,
             "essay_score_24": attempt.essay.total_score_24 if attempt.essay else None,
             "items": items,
-    }
+        }
