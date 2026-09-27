@@ -46,6 +46,7 @@ from bot.db.models import (
     TestType,
 )
 from bot.services import question_parser as qp
+from bot.services.tg_format import message_text_with_markers
 from bot.utils.codes import generate_test_code
 
 router = Router(name="admin_create_test")
@@ -216,7 +217,7 @@ async def on_essay_topic(message: Message, state: FSMContext) -> None:
 @router.message(CreateTest.collecting)
 async def on_collecting_message(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
-    raw_lines = (message.text or "").replace("\r\n", "\n").split("\n")
+    raw_lines = message_text_with_markers(message).replace("\r\n", "\n").split("\n")
     replies: list[str] = []
     errors: list[str] = []
 
