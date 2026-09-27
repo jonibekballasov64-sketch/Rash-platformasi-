@@ -153,7 +153,10 @@ class Question(Base):
     # SHORT_ANSWER uchun qabul qilinadigan variantlar ro'yxati (avto-bosh-harf solishtiriladi)
     accepted_answers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
-    # TWO_PART_SHORT (40-44) uchun B-qism ma'lumotlari
+    # TWO_PART_SHORT (40-44) uchun A-qism va B-qism savol matnlari (asosiy
+    # "text" maydoni faqat umumiy/kirish matni, A/B qismlarning o'z savol
+    # matni alohida shu yerda saqlanadi)
+    part_a_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     part_b_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     part_b_accepted_answers: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     part_b_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
