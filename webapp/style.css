@@ -42,7 +42,23 @@ button:disabled { opacity: .4; cursor: default; }
   padding: 14px; margin-bottom: 14px; line-height: 1.7; white-space: pre-wrap;
 }
 
-.question-text { font-size: 16px; font-weight: 600; margin-bottom: 12px; line-height: 1.5; white-space: pre-wrap; }
+.question-text { font-size: 16px; font-weight: 400; margin-bottom: 12px; line-height: 1.5; white-space: pre-wrap; }
+
+/* Admin **qalin**/__qiya__ belgilab yuborgan qismlar (savol matni, passage,
+   variantlar, izoh) shu yerda aniq ko'rinishi uchun — .question-text ning
+   o'zi endi oddiy (400) og'irlikda, shu sabab <strong> aniq farq qiladi. */
+.question-text strong,
+.passage-box strong,
+.review-item strong,
+.matching-legend strong {
+  font-weight: 700;
+}
+.question-text em,
+.passage-box em,
+.review-item em,
+.matching-legend em {
+  font-style: italic;
+}
 
 /* 36-39 / 40-44 savollar ichidagi | so'z | ramkalari uchun (admin kiritishda
    | belgisi bilan ajratgan qismlar shu klass bilan avtomatik konvertatsiya
