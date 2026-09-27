@@ -7,7 +7,7 @@ kod haqiqiy Rasch (1-parametrli logistik IRT) modelining standart Joint
 Maximum Likelihood Estimation (JMLE) algoritmini amalga oshiradi va natijani
 0-75 ball shkalasiga o'zingiz sozlashingiz mumkin bo'lgan ikkita konstanta
 (CENTER_SCORE, SCALE) yordamida o'giradi. Bu **taxminiy** modeldir — agar
-sizda rasmiy tizimning bir nechta o'tgan test natijalari (necha kishi,
+sizda rasmiy tizimning бир nechta o'tgan test natijalari (necha kishi,
 qaysi savolga qanday javob berganini bilsangiz) bo'lsa, CENTER_SCORE va
 SCALE qiymatlarini shu real natijalarga moslab sozlash mumkin (masalan
 regressiya orqali). Hozircha standart logistik shkala anchor qilingan.
@@ -26,6 +26,17 @@ CENTER_SCORE = 60.0   # theta=0 (o'rtacha qobiliyat) taxminan qaysi ballga to'g'
 SCALE = 10.0          # 1 logit necha ballga teng (kattaroq SCALE -> balllar keskinroq farqlanadi)
 MAX_ITERATIONS = 60
 CONVERGENCE_EPS = 1e-4
+
+# Kichik namunada (masalan bir nechta kishi bitta testni ishlagan holatda)
+# JMLE ba'zi savol/kishilar uchun "separation" (hammaga to'g'ri yoki hammaga
+# xato) holatiga juda yaqinlashib, iteratsiya davomida theta/b qiymatlarini
+# CHEKSIZLIKKA intiltirib yuborishi mumkin — natijada 11111, 10045 kabi
+# mantiqsiz ballar chiqadi. Buning oldini olish uchun:
+#   1) Har bir Newton-Raphson qadamidagi o'zgarish (delta) MAX_DELTA bilan
+#      cheklanadi (bitta iteratsiyada juda katta sakrash bo'lmasin).
+#   2) theta/b qiymatlarining o'zi MAX_LOGIT oralig'idan chiqmaydi.
+MAX_DELTA = 1.0
+MAX_LOGIT = 6.0
 
 
 @dataclass
@@ -101,8 +112,10 @@ def estimate_rasch(
                 info += p * (1 - p)
             if info > 1e-6:
                 delta = (observed - expected) / info
+                delta = max(-MAX_DELTA, min(MAX_DELTA, delta))
                 # Rasch'da item logit person'ga teskari ishorada yangilanadi
                 new_b = b[qid] - delta
+                new_b = max(-MAX_LOGIT, min(MAX_LOGIT, new_b))
                 max_change = max(max_change, abs(new_b - b[qid]))
                 b[qid] = new_b
 
@@ -118,7 +131,9 @@ def estimate_rasch(
                 info += p * (1 - p)
             if info > 1e-6:
                 delta = (observed - expected) / info
+                delta = max(-MAX_DELTA, min(MAX_DELTA, delta))
                 new_theta = theta[aid] + delta
+                new_theta = max(-MAX_LOGIT, min(MAX_LOGIT, new_theta))
                 max_change = max(max_change, abs(new_theta - theta[aid]))
                 theta[aid] = new_theta
 
@@ -147,6 +162,16 @@ def estimate_rasch(
             else:  # hammasiga xato javob
                 theta[aid] = -4.0
 
-    scores_75 = {aid: round(CENTER_SCORE + theta[aid] * SCALE, 2) for aid in attempt_ids}
+    # DIQQAT: 75 — bu shkalaning "markazi atrofidagi" nazariy ko'rsatkichi,
+    # QATTIQ YUQORI CHEGARA EMAS — haqiqiy tizimda ham juda yaxshi natija
+    # ko'rsatgan talabgor 75 dan yuqori (masalan 83) ball olishi normal, shu
+    # sabab bu yerda 75 ga qisqartirilmaydi. Faqat manfiy tomonga (ball 0 dan
+    # past bo'lib qolmasligi uchun) va MAX_LOGIT bilan chegaralangan theta
+    # tufayli yuqori tomondan ham mantiqsiz (masalan minglab) qiymat
+    # chiqmasligi ta'minlanadi.
+    scores_75 = {
+        aid: round(max(0.0, CENTER_SCORE + theta[aid] * SCALE), 2)
+        for aid in attempt_ids
+    }
 
     return RaschResult(item_difficulties=b, person_abilities=theta, person_scores_75=scores_75)
