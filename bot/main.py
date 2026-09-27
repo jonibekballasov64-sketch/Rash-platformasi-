@@ -13,6 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from bot.config import settings
 from bot.db.base import init_db
 from bot.handlers.admin.create_test import router as admin_create_test_router
+from bot.handlers.admin.edit_test import router as admin_edit_test_router
 from bot.handlers.admin.my_tests import router as admin_my_tests_router
 from bot.handlers.student.start import router as student_start_router
 
@@ -27,6 +28,7 @@ async def main() -> None:
     dp = Dispatcher(storage=MemoryStorage())
 
     dp.include_router(admin_create_test_router)
+    dp.include_router(admin_edit_test_router)
     dp.include_router(admin_my_tests_router)
     dp.include_router(student_start_router)
 
