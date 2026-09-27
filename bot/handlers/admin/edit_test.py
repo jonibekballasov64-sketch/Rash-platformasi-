@@ -17,8 +17,23 @@ Ishlash tartibi:
      bo'lganda), bot buni ham /yangitest kabi avtomatik ulaydi.
   6. /bekor — tahrirlashni tugatadi (test hali READY holatida qoladi, allaqachon
      saqlangan o'zgarishlar bekor qilinmaydi — faqat rejim tugaydi).
+
+MATNLARNI (ilmiy/badiiy/g'azal passage) TAHRIRLASH:
+  Savollardan farqli ravishda, matnlar order_no bilan emas, turi bilan
+  aniqlanadi. Formati:
+      ‼️BADIIY
+      yangi matn birinchi qatori
+      yangi matn ikkinchi qatori
+      ...
+      ‼️
+  Birinchi qatorda ‼️ dan keyin ILMIY, BADIIY yoki GAZAL so'zlaridan biri
+  yozilishi shart (katta-kichik harf farqi yo'q). Matn uzun bo'lsa va
+  Telegram uni avtomatik bir necha xabarga bo'lib yuborsa, savollardagi kabi
+  bot davomini avtomatik kutib oladi.
 """
 from __future__ import annotations
+
+import re
 
 from aiogram import Router
 from aiogram.filters import Command, StateFilter
@@ -28,11 +43,13 @@ from aiogram.types import Message
 from sqlalchemy import select
 
 from bot.db.base import get_session
-from bot.db.models import AdminUser, Question, QuestionType, Test
+from bot.db.models import AdminUser, Passage, PassageType, Question, QuestionType, Test
 from bot.services import question_parser as qp
 from bot.services.tg_format import message_text_with_markers
 
 router = Router(name="admin_edit_test")
+
+_PASSAGE_OPEN = re.compile(r"^\s*‼️\s*(ILMIY|BADIIY|GAZAL)\s*$", re.IGNORECASE)
 
 
 class EditTest(StatesGroup):
@@ -83,6 +100,8 @@ async def on_code_entered(message: Message, state: FSMContext) -> None:
         test_code=test.code,
         open_question_lines=None,
         open_question_retries=0,
+        open_passage_lines=None,
+        open_passage_type=None,
     )
     await state.set_state(EditTest.editing)
     await message.answer(
@@ -98,6 +117,10 @@ async def on_code_entered(message: Message, state: FSMContext) -> None:
         "⚠️Izoh: ...\n\n"
         "Savol raqami (⁉️41.) qaysi bo'lsa, o'sha raqamli MAVJUD savol shu bilan "
         "ALMASHTIRILADI. Bitta xabarda bir nechta savolni ham yuborish mumkin.\n\n"
+        "Ilmiy/badiiy/g'azal MATNni tahrirlash uchun:\n"
+        "‼️BADIIY\n"
+        "yangi matn...\n"
+        "‼️\n\n"
         "Tugatgach /bekor bilan chiqing.",
         parse_mode="HTML",
     )
@@ -109,14 +132,32 @@ async def on_edit_message(message: Message, state: FSMContext) -> None:
     test_id = data["test_id"]
     raw_lines = message_text_with_markers(message).replace("\r\n", "\n").split("\n")
 
+    replies: list[str] = []
+    errors: list[str] = []
+
+    # 0) Oldingi xabardan davom etayotgan (‼️ bilan hali yopilmagan) MATN
+    #    (ilmiy/badiiy/g'azal) bo'lsa, avval shuni davom ettiramiz.
+    if data.get("open_passage_lines") is not None:
+        close_idx = next((k for k, ln in enumerate(raw_lines) if ln.strip() == "‼️"), None)
+        if close_idx is None:
+            data["open_passage_lines"].extend(raw_lines)
+            await state.set_data(data)
+            await message.answer(
+                "📄 Matn davom etmoqda... Tugagach oxiriga alohida qatorda ‼️ belgisini qo'ying."
+            )
+            return
+        passage_text = "\n".join(data["open_passage_lines"] + raw_lines[:close_idx]).strip()
+        msg = await _update_passage(test_id, data["open_passage_type"], passage_text)
+        (replies if msg.startswith("✅") else errors).append(msg)
+        data["open_passage_lines"] = None
+        data["open_passage_type"] = None
+        raw_lines = raw_lines[close_idx + 1:]
+
     # Oldingi xabardan davom etayotgan (Telegram tomonidan bo'lib yuborilgan)
     # savol bo'lsa, avval shuni davom ettiramiz.
     if data.get("open_question_lines") is not None:
         raw_lines = data["open_question_lines"] + raw_lines
         data["open_question_lines"] = None
-
-    replies: list[str] = []
-    errors: list[str] = []
 
     i = 0
     n = len(raw_lines)
@@ -124,6 +165,31 @@ async def on_edit_message(message: Message, state: FSMContext) -> None:
         line = raw_lines[i]
         if line.strip() == "":
             i += 1
+            continue
+
+        passage_open = _PASSAGE_OPEN.match(line)
+        if passage_open:
+            ptype = passage_open.group(1).upper()
+            close_idx = next(
+                (k for k in range(i + 1, n) if raw_lines[k].strip() == "‼️"), None
+            )
+            if close_idx is None:
+                data["open_passage_lines"] = raw_lines[i + 1:]
+                data["open_passage_type"] = ptype
+                await state.set_data(data)
+                if replies:
+                    await message.answer("\n".join(replies))
+                if errors:
+                    await message.answer("\n".join(errors))
+                await message.answer(
+                    "📄 Matn boshlandi, lekin shu xabarda tugamadi. Davomini keyingi "
+                    "xabar(lar)da yuboring, oxirida ‼️ qo'yishni unutmang."
+                )
+                return
+            passage_text = "\n".join(raw_lines[i + 1:close_idx]).strip()
+            msg = await _update_passage(test_id, ptype, passage_text)
+            (replies if msg.startswith("✅") else errors).append(msg)
+            i = close_idx + 1
             continue
 
         order_no = qp.question_order_no(line)
@@ -199,6 +265,25 @@ async def on_edit_message(message: Message, state: FSMContext) -> None:
         parts.append("Hech narsa qabul qilinmadi.")
     parts.append("Yana savol yuborishingiz mumkin, tugatgach /bekor bilan chiqing.")
     await message.answer("\n\n".join(parts))
+
+
+async def _update_passage(test_id: int, ptype: str, text: str) -> str:
+    try:
+        passage_type = PassageType(ptype.lower())
+    except ValueError:
+        return f"❌ Noma'lum matn turi: {ptype} (ILMIY, BADIIY yoki GAZAL bo'lishi kerak)."
+    if not text:
+        return f"❌ {ptype} matni bo'sh bo'lishi mumkin emas."
+    async with get_session() as session:
+        result = await session.execute(
+            select(Passage).where(Passage.test_id == test_id, Passage.passage_type == passage_type)
+        )
+        passage = result.scalar_one_or_none()
+        if passage is None:
+            return f"❌ Bu testda {ptype} turidagi matn topilmadi."
+        passage.text = text
+        await session.commit()
+    return f"✅ {ptype} matni yangilandi."
 
 
 async def _get_question(session, test_id: int, order_no: int) -> Question | None:
