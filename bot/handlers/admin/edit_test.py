@@ -30,6 +30,7 @@ from sqlalchemy import select
 from bot.db.base import get_session
 from bot.db.models import AdminUser, Question, QuestionType, Test
 from bot.services import question_parser as qp
+from bot.services.tg_format import message_text_with_markers
 
 router = Router(name="admin_edit_test")
 
@@ -106,7 +107,7 @@ async def on_code_entered(message: Message, state: FSMContext) -> None:
 async def on_edit_message(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     test_id = data["test_id"]
-    raw_lines = (message.text or "").replace("\r\n", "\n").split("\n")
+    raw_lines = message_text_with_markers(message).replace("\r\n", "\n").split("\n")
 
     # Oldingi xabardan davom etayotgan (Telegram tomonidan bo'lib yuborilgan)
     # savol bo'lsa, avval shuni davom ettiramiz.
@@ -244,6 +245,7 @@ async def _update_twopart(test_id: int, parsed) -> str:
         if q.question_type != QuestionType.TWO_PART_SHORT:
             return f"❌ {parsed.order_no}-savol bu testda boshqa turdagi savol ({q.question_type.value}) — ikki qismli (A/B) formatga almashtirib bo'lmaydi."
         q.text = parsed.text
+        q.part_a_text = parsed.part_a_text
         q.accepted_answers = parsed.part_a_answers
         q.explanation = parsed.part_a_explanation
         q.part_b_text = parsed.part_b_text
