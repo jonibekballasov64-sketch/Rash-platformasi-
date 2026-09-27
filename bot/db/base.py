@@ -34,6 +34,12 @@ async def init_db() -> None:
         await conn.execute(
             text("ALTER TABLE essay_responses ADD COLUMN IF NOT EXISTS warnings JSONB")
         )
+        # 40-44 (ikki qismli) savollarning A-qismi o'z savol matni uchun
+        # keyinroq qo'shilgan ustun (avval faqat B-qism matni saqlanardi,
+        # A-qismi umuman ko'rinmas edi)
+        await conn.execute(
+            text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS part_a_text TEXT")
+        )
 
 
 @asynccontextmanager
