@@ -72,13 +72,19 @@ async def recompute_test_results(
     # BARCHA (eski e'lon qilingan + yangi) urinishlarning javoblari
     # ishlatiladi — faqat natijani YOZISH va E'LON QILISH bosqichida
     # allaqachon e'lon qilinganlar chetlab o'tiladi.
-    responses: dict[int, dict[int, int]] = {}
+    #
+    # MUHIM (xato tuzatma): ikki qismli savollar (40-44) uchun sub_part'ni
+    # ham kalitga kiritamiz. Aks holda (40:A) va (40:B) javoblar faqat
+    # question_id=40 bo'lgan uchun biri boshqasini o'chirib qo'yadi va
+    # Rasch skoori noto'g'ri hisoblanadi.
+    responses: dict[int, dict[str, int]] = {}
     for attempt in attempts:
-        answered = {
-            a.question_id: (1 if a.is_correct else 0)
-            for a in attempt.answers
-            if a.is_correct is not None  # belgilanmagan savol hisobga kirmaydi
-        }
+        answered = {}
+        for a in attempt.answers:
+            if a.is_correct is not None:
+                # sub_part bilan birgalikda kalit: "40:A", "40:B", yoki "1:" (oddiy savol)
+                key = f"{a.question_id}:{a.sub_part or ''}"
+                answered[key] = 1 if a.is_correct else 0
         if answered:
             responses[attempt.id] = answered
 
