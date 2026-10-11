@@ -18,6 +18,8 @@ Vazifasi:
         (services/results.py).
   - GET  /api/attempt/{attempt_id}/review   -> yakunlangach javob/izohlarni
         ko'rish uchun to'liq ma'lumot (✅/⚠️ bilan).
+  - POST /api/pause-attempt/{attempt_id}    -> test sessiyasini pause qilish
+        (internet uzildi, app yopildi, va h.k.)
   - static/ -> webapp/ papkasidagi HTML/CSS/JS fayllarni xizmat qiladi.
 
 DIQQAT: bu MVP darajasidagi ilova. Aniq vizual talablar (33-35 uchun
@@ -62,6 +64,7 @@ from bot.db.models import (
 )
 from bot.services.essay import NotConfiguredError, format_evaluation_messages, grade_essay
 from bot.services.scoring import MIN_ESSAY_WORDS
+from bot.services.session import pause_attempt, resume_attempt
 
 MAX_ATTEMPTS = 2
 
@@ -119,6 +122,10 @@ class RegisterIn(BaseModel):
     full_name: str
     test_code: str
     category: str
+
+
+class PauseAttemptIn(BaseModel):
+    reason: str = "network"  # "network", "browser_close", "tab_hidden"
 
 
 # --------------------------------------------------------------------------- #
@@ -730,3 +737,64 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
             "essay_score_24": attempt.essay.total_score_24 if attempt.essay else None,
             "items": items,
         }
+
+
+# ✅ YANGI ENDPOINTLAR: Session pause/resume
+# ============================================================================
+
+
+@app.post("/api/pause-attempt/{attempt_id}")
+async def pause_test_attempt(attempt_id: int, payload: PauseAttemptIn) -> dict[str, Any]:
+    """Test sessiyasini pause qilish (internet uzildi, app yopildi, va h.k.).
+    Frontend bu endpointni beforeunload/offline/visibilitychange eventlarida chaqiradi."""
+    async with get_session() as session:
+        result = await pause_attempt(session, attempt_id, payload.reason)
+        
+        if not result.success:
+            raise HTTPException(400, result.message)
+        
+        # Telegram'ga xabar jo'natish: qolgan vaqt bilan birga
+        attempt = result.attempt
+        if attempt and attempt.learner:
+            remaining_min = result.remaining_seconds // 60 if result.remaining_seconds else 0
+            msg = (
+                f"⏸️ Sizning test ulanishi uzildi.\n\n"
+                f"Qolgan vaqt: {remaining_min} minut\n"
+                f"Bot'da /resume buyrug'ini yozing yoki \"Davom ettirish\" tugmasini bosing."
+            )
+            try:
+                await _send_telegram_message(attempt.learner.telegram_id, msg)
+            except Exception:
+                logger.exception("Pause xabarini yuborishda xato (attempt_id=%s)", attempt_id)
+        
+        return {
+            "success": result.success,
+            "message": result.message,
+            "remaining_seconds": result.remaining_seconds,
+        }
+
+
+@app.get("/api/attempt/{attempt_id}/check-pause")
+async def check_pause_status(attempt_id: int) -> dict[str, Any]:
+    """Pauzalangan test'ni tekshirish uchun — resumable bo'lsa true qaytaradi."""
+    async with get_session() as session:
+        result = await session.execute(
+            select(Attempt).where(Attempt.id == attempt_id)
+        )
+        attempt = result.scalar_one_or_none()
+        
+        if attempt is None:
+            raise HTTPException(404, "Urinish topilmadi")
+        
+        is_paused = attempt.paused_at is not None
+        remaining_seconds = None
+        
+        if is_paused and attempt.status == AttemptStatus.IN_PROGRESS:
+            time_remaining = attempt.deadline_at - attempt.paused_at
+            remaining_seconds = int(time_remaining.total_seconds())
+        
+        return {
+            "is_paused": is_paused,
+            "pause_reason": attempt.pause_reason,
+            "remaining_seconds": remaining_seconds,
+}
