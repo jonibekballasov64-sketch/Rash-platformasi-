@@ -214,6 +214,11 @@ class Attempt(Base):
     # hisoblanadi va e'lon qilinadi. (services/results.py -> recompute_test_results)
     published_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Session resumption uchun: internet uzildi, app yopildi, vs
+    # paused_at to'ldirilganda, "Davom ettirish" tugmasi ko'rsatiladi
+    paused_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pause_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)  # "network", "app_closed", etc.
+
     test: Mapped[Test] = relationship(back_populates="attempts")
     learner: Mapped[LearnerUser] = relationship(back_populates="attempts")
     answers: Mapped[list["Answer"]] = relationship(back_populates="attempt", cascade="all, delete-orphan")
