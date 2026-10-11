@@ -23,6 +23,8 @@ istalgan miqdorda (bittalab yoki bir nechtasini bittalashtirib) yubora oladi:
 """
 from __future__ import annotations
 
+import re
+
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -59,6 +61,9 @@ DURATION_BY_TYPE = {
 TOTAL_QUESTIONS = 44
 # 18-22 -> ilmiy, 23-27 -> badiiy, 28-32 -> gazal (test tuzilishi doim shu tartibda)
 PASSAGE_TYPE_BY_INDEX = ["ilmiy", "badiiy", "gazal"]
+
+# Passage type detection (like in edit_test.py)
+_PASSAGE_TYPE_MARKER = re.compile(r"^\s*‼️\s*(ILMIY|BADIIY|GAZAL)\s*$", re.IGNORECASE)
 
 
 def _passage_type_for_order(order_no: int) -> str | None:
@@ -108,8 +113,9 @@ async def on_type_chosen(callback: CallbackQuery, state: FSMContext) -> None:
     await state.update_data(
         test_type=test_type.value,
         questions={},
-        passages=[],
+        passages={},  # ✅ Changed to dict for passage type detection
         open_passage_lines=None,
+        open_passage_type=None,  # ✅ Added: track passage type
         open_question_lines=None,
         open_question_retries=0,
         essay_topic=None,
@@ -134,13 +140,21 @@ async def cmd_status(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     have = sorted(int(k) for k in data.get("questions", {}).keys())
     missing = [n for n in range(1, TOTAL_QUESTIONS + 1) if n not in have]
-    passages_count = len(data.get("passages", []))
+    passages_dict = data.get("passages", {})
+    passages_count = len(passages_dict)
     lines = [
         f"Qabul qilingan savollar: {len(have)}/{TOTAL_QUESTIONS}",
         f"Matnlar: {passages_count}/3",
     ]
+    if passages_count > 0:
+        passages_list = ", ".join(k.upper() for k in sorted(passages_dict.keys()))
+        lines.append(f"  Qabul qilingan: {passages_list}")
     if data.get("open_passage_lines") is not None:
-        lines.append("⏳ Hozir bitta matn davom etmoqda (‼️ bilan hali yopilmagan).")
+        ptype = data.get("open_passage_type")
+        if ptype:
+            lines.append(f"⏳ {ptype.upper()} matni davom etmoqda (‼️ bilan hali yopilmagan).")
+        else:
+            lines.append("⏳ Hozir bitta matn davom etmoqda (‼️ bilan hali yopilmagan).")
     if data.get("open_question_lines") is not None:
         lines.append(
             "⏳ Bitta savol matni davom etmoqda (Telegram xabarni bo'lib yuborgan "
@@ -160,8 +174,10 @@ async def cmd_finish(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
 
     if data.get("open_passage_lines") is not None:
+        ptype = data.get("open_passage_type")
+        type_str = f"{ptype.upper()} " if ptype else ""
         await message.answer(
-            "❌ Bitta matn hali ‼️ bilan yopilmagan. Uni tugating (oxiriga ‼️ qo'ying), "
+            f"❌ {type_str}matn hali ‼️ bilan yopilmagan. Uni tugating (oxiriga ‼️ qo'ying), "
             "keyin qaytadan /tugatdim yuboring."
         )
         return
@@ -182,11 +198,13 @@ async def cmd_finish(message: Message, state: FSMContext) -> None:
         )
         return
 
-    passages = data.get("passages", [])
-    if len(passages) < 3:
+    passages = data.get("passages", {})
+    required_types = {"ilmiy", "badiiy", "gazal"}
+    missing_types = required_types - set(passages.keys())
+    if missing_types:
         await message.answer(
-            f"❌ Matnlar yetarli emas ({len(passages)}/3). Ilmiy, badiiy va g'azal "
-            "matnlarini (tabiiy tartibda) yuboring."
+            f"❌ Quyidagi matnlar yetarli emas: {', '.join(t.upper() for t in sorted(missing_types))}. "
+            "Barcha uchta matnni (ILMIY, BADIIY, GAZAL) yuboring."
         )
         return
 
@@ -233,9 +251,11 @@ async def on_collecting_message(message: Message, state: FSMContext) -> None:
             )
             return
         passage_text = "\n".join(data["open_passage_lines"] + raw_lines[:close_idx]).strip()
-        data["passages"].append(passage_text)
-        replies.append(f"✅ {len(data['passages'])}-matn qabul qilindi.")
+        ptype = data["open_passage_type"]
+        data["passages"][ptype] = passage_text
+        replies.append(f"✅ {ptype.upper()} matni qabul qilindi.")
         data["open_passage_lines"] = None
+        data["open_passage_type"] = None
         raw_lines = raw_lines[close_idx + 1:]
 
     # 1b) Xuddi shunday — agar oldingi xabar TELEGRAM TOMONIDAN AVTOMATIK
@@ -255,23 +275,57 @@ async def on_collecting_message(message: Message, state: FSMContext) -> None:
             i += 1
             continue
 
+        # ✅ Check for passage with type marker: ‼️ILMIY, ‼️BADIIY, ‼️GAZAL
+        passage_marker = _PASSAGE_TYPE_MARKER.match(line)
+        if passage_marker:
+            ptype = passage_marker.group(1).lower()
+            close_idx = next(
+                (k for k in range(i + 1, n) if raw_lines[k].strip() == "‼️"), None
+            )
+            if close_idx is None:
+                data["open_passage_lines"] = raw_lines[i + 1:]
+                data["open_passage_type"] = ptype
+                await state.set_data(data)
+                if replies:
+                    await message.answer("\n".join(replies))
+                await message.answer(
+                    "📄 " + ptype.upper() + " matni boshlandi, lekin shu xabarda tugamadi. "
+                    "Davomini keyingi xabar(lar)da yuboring, oxirida ‼️ qo'yishni unutmang."
+                )
+                return
+            passage_text = "\n".join(raw_lines[i + 1:close_idx]).strip()
+            data["passages"][ptype] = passage_text
+            replies.append(f"✅ {ptype.upper()} matni qabul qilindi.")
+            i = close_idx + 1
+            continue
+
+        # ✅ Also handle old format: standalone ‼️ without type (for backward compatibility)
         if line.strip() == "‼️":
             close_idx = next(
                 (k for k in range(i + 1, n) if raw_lines[k].strip() == "‼️"), None
             )
             if close_idx is None:
                 data["open_passage_lines"] = raw_lines[i + 1:]
+                data["open_passage_type"] = None  # No type specified
                 await state.set_data(data)
                 if replies:
                     await message.answer("\n".join(replies))
                 await message.answer(
                     "📄 Matn boshlandi, lekin shu xabarda tugamadi. Davomini keyingi "
-                    "xabar(lar)da yuboring, oxirida ‼️ qo'yishni unutmang."
+                    "xabar(lar)da yuboring, oxirida ‼️ qo'yishni unutmang.\n\n"
+                    "💡 Maslahat: Matnning boshiga ‼️ILMIY, ‼️BADIIY yoki ‼️GAZAL "
+                    "yozsangiz, bot to'g'ri joyga qo'yadi."
                 )
                 return
             passage_text = "\n".join(raw_lines[i + 1:close_idx]).strip()
-            data["passages"].append(passage_text)
-            replies.append(f"✅ {len(data['passages'])}-matn qabul qilindi.")
+            # Auto-detect type based on question numbers (18-22=ilmiy, 23-27=badiiy, 28-32=gazal)
+            # For now, store in order as ilmiy, badiiy, gazal
+            auto_ptype = ["ilmiy", "badiiy", "gazal"][len(data["passages"])] if len(data["passages"]) < 3 else "unknown"
+            if auto_ptype != "unknown":
+                data["passages"][auto_ptype] = passage_text
+                replies.append(f"✅ {auto_ptype.upper()} matni (avtomatik aniqlandi) qabul qilindi.")
+            else:
+                replies.append(f"⚠️ Matn qabul qilindi, lekin 3 ta dan ortiq matn. Faqat birinchi 3 tasi qo'llaniladi.")
             i = close_idx + 1
             continue
 
@@ -410,10 +464,7 @@ async def _finalize_test(message: Message, state: FSMContext) -> None:
     test_type = TestType(data["test_type"])
     code = generate_test_code()
 
-    passages_list: list[str] = data.get("passages", [])
-    passages_dict = {
-        PASSAGE_TYPE_BY_INDEX[idx]: text for idx, text in enumerate(passages_list[:3])
-    }
+    passages_dict: dict[str, str] = data.get("passages", {})
 
     async with get_session() as session:
         admin = await _get_or_create_admin(session, message.from_user.id, message.from_user.full_name)
