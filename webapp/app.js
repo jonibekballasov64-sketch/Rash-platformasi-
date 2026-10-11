@@ -68,6 +68,36 @@ function answerKey(qid, subPart) {
   return `${qid}:${subPart || ""}`;
 }
 
+// --- Disconnect handler: Internet ket, browser yopildi, yoki tab hidden bo'lsa
+// automatik pause qilinadi. Qolgan vaqt bilan bot orqali notification yuboriladi.
+function setupDisconnectHandlers() {
+  // Internet ulanmay ketsa
+  window.addEventListener("offline", () => {
+    navigator.sendBeacon(
+      `/api/pause-attempt/${attemptId}`,
+      JSON.stringify({ reason: "network" })
+    );
+  });
+
+  // Browser yoki tab yopilsa
+  window.addEventListener("beforeunload", () => {
+    navigator.sendBeacon(
+      `/api/pause-attempt/${attemptId}`,
+      JSON.stringify({ reason: "browser_close" })
+    );
+  });
+
+  // Tab hidden bo'lsa (boshqa app'ga o'tsa)
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      navigator.sendBeacon(
+        `/api/pause-attempt/${attemptId}`,
+        JSON.stringify({ reason: "tab_hidden" })
+      );
+    }
+  });
+}
+
 async function load() {
   if (!attemptId) {
     els.area.innerHTML = "<p>attempt_id topilmadi.</p>";
@@ -82,6 +112,7 @@ async function load() {
   state.questions = state.data.questions;
   state.screens = buildScreens(state.questions);
   state.deadline = new Date(state.data.deadline_at);
+  setupDisconnectHandlers(); // Disconnect handlerlari o'rnatiladi
   startTimer();
   render();
 }
