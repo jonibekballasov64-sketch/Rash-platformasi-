@@ -33,6 +33,7 @@ import datetime as dt
 import hashlib
 import hmac
 import logging
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any
@@ -219,21 +220,46 @@ def _naive_utc(value: dt.datetime) -> dt.datetime:
     return value
 
 
+# Har xil apostrof belgilari (o', oʻ, o’, o‘, o`, o´ ...) — hammasi bitta "'" ga keltiriladi
+_APOSTROPHE_RE = re.compile("[‘’ʻʼʹ`´′＇]")
+_PUNCT_RE = re.compile(r"[.,;:!?\"()\[\]«»“”\-–—]+")
+
+
+def _norm_answer(text: str | None) -> str:
+    """Javobni solishtirish uchun normallashtiradi: Unicode, apostrof variantlari,
+    katta-kichik harf, ortiqcha bo'shliq va tinish belgilari e'tiborga olinmaydi."""
+    s = unicodedata.normalize("NFKC", text or "")
+    s = _APOSTROPHE_RE.sub("'", s)
+    s = _PUNCT_RE.sub(" ", s.casefold())
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _answer_key(text: str | None) -> str:
+    """Apostrofsiz shakl: o'g'il == ogil == oʻgʻil."""
+    return _norm_answer(text).replace("'", "")
+
+
+def _matches_any(given: str, accepted: list[str] | None) -> bool:
+    g_norm, g_key = _norm_answer(given), _answer_key(given)
+    if not g_norm:
+        return False
+    for a in accepted or []:
+        if g_norm == _norm_answer(a) or (g_key and g_key == _answer_key(a)):
+            return True
+    return False
+
+
 def _check_answer(question: Question, sub_part: str | None, given: str) -> bool:
-    given_norm = given.strip().lower()
     if question.question_type in (QuestionType.SINGLE_CHOICE, QuestionType.MATCHING):
-        return given_norm.upper() == (question.correct_option or "").upper()
+        return given.strip().upper() == (question.correct_option or "").strip().upper()
 
     if question.question_type == QuestionType.SHORT_ANSWER:
-        accepted = [a.strip().lower() for a in (question.accepted_answers or [])]
-        return given_norm in accepted
+        return _matches_any(given, question.accepted_answers)
 
     if question.question_type == QuestionType.TWO_PART_SHORT:
         if sub_part == "A":
-            accepted = [a.strip().lower() for a in (question.accepted_answers or [])]
-        else:
-            accepted = [a.strip().lower() for a in (question.part_b_accepted_answers or [])]
-        return given_norm in accepted
+            return _matches_any(given, question.accepted_answers)
+        return _matches_any(given, question.part_b_accepted_answers)
 
     return False
 
