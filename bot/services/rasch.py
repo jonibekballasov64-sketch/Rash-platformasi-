@@ -90,19 +90,41 @@ def estimate_rasch(
     # Agar biror savolga hamma to'g'ri yoki hamma xato javob bergan bo'lsa (yoki
     # biror kishi hammaga to'g'ri/xato javob bergan bo'lsa), Rasch baholanmaydi
     # (cheksizlikka intiladi) — bunday holatlarni chetlab o'tamiz (extreme score).
+    #
+    # MUHIM (xato tuzatma): bunday savol/kishilar hisobdan TO'LIQ chiqariladi —
+    # ya'ni boshqa tomonning hisobiga ham kirmaydi. Avval hamma xato javob bergan
+    # savol "o'rtacha qiyinlikdagi (b=0) savol" sifatida har bir o'quvchining
+    # qobiliyat hisobida qolib ketardi va butun guruhning balini sun'iy
+    # pasaytirardi (masalan, 68 kishilik testda bitta shunday savol hammaning
+    # test balini ~10 ballga tushirgan). Standart Rasch dasturlari (Winsteps va
+    # h.k.) kabi chiqarib tashlash takrorlanadi: savol chiqarilgach, biror kishi
+    # qolgan savollarning hammasiga to'g'ri/xato javob bergan bo'lib qolishi
+    # mumkin (va aksincha).
     def has_variance(pairs: list[tuple[int, int]]) -> bool:
         vals = {x for _, x in pairs}
         return len(vals) > 1
 
-    estimable_items = {qid for qid, pairs in item_answers.items() if has_variance(pairs)}
-    estimable_persons = {aid for aid, pairs in person_answers.items() if has_variance(pairs)}
+    estimable_items = set(question_ids)
+    estimable_persons = set(attempt_ids)
+    while True:
+        new_items = {
+            qid for qid in estimable_items
+            if has_variance([(aid, x) for aid, x in item_answers[qid] if aid in estimable_persons])
+        }
+        new_persons = {
+            aid for aid in estimable_persons
+            if has_variance([(qid, x) for qid, x in person_answers[aid] if qid in new_items])
+        }
+        if new_items == estimable_items and new_persons == estimable_persons:
+            break
+        estimable_items, estimable_persons = new_items, new_persons
 
     for _ in range(MAX_ITERATIONS):
         max_change = 0.0
 
         # Item qiyinligini yangilash (b oshsa savol qiyinlashadi)
         for qid in estimable_items:
-            pairs = item_answers[qid]
+            pairs = [(aid, x) for aid, x in item_answers[qid] if aid in estimable_persons]
             observed = sum(x for _, x in pairs)
             expected = 0.0
             info = 0.0
@@ -121,7 +143,7 @@ def estimate_rasch(
 
         # Person qobiliyatini yangilash
         for aid in estimable_persons:
-            pairs = person_answers[aid]
+            pairs = [(qid, x) for qid, x in person_answers[aid] if qid in estimable_items]
             observed = sum(x for _, x in pairs)
             expected = 0.0
             info = 0.0
@@ -139,10 +161,16 @@ def estimate_rasch(
 
         # Markazlashtirish: item qiyinliklari o'rtachasi 0 bo'lsin (Rasch'da shkala
         # erkin siljiydi, shuning uchun har iteratsiyada anchor qilib turamiz)
+        # MUHIM (xato tuzatma): qobiliyatlar ham xuddi shuncha siljitiladi —
+        # aks holda har bir markazlashtirish theta-b farqlarini buzib, hisob
+        # juda sekin yaqinlashardi (60 iteratsiyada ballar ~1.5 ballga kam
+        # chiqib qolardi).
         if estimable_items:
             mean_b = sum(b[qid] for qid in estimable_items) / len(estimable_items)
             for qid in estimable_items:
                 b[qid] -= mean_b
+            for aid in estimable_persons:
+                theta[aid] -= mean_b
 
         if max_change < CONVERGENCE_EPS:
             break
@@ -152,15 +180,33 @@ def estimate_rasch(
     # qolmasin)
     for aid in attempt_ids:
         if aid not in estimable_persons:
-            pairs = person_answers[aid]
+            # Baholanadigan savollar bo'yicha qaraymiz (agar ular umuman bo'lmasa —
+            # barcha javoblar bo'yicha)
+            pairs = [(qid, x) for qid, x in person_answers[aid] if qid in estimable_items]
+            if not pairs:
+                pairs = person_answers[aid]
             total = sum(x for _, x in pairs)
             n = len(pairs)
             if n == 0:
                 theta[aid] = 0.0
             elif total == n:  # hammasiga to'g'ri javob
                 theta[aid] = 4.0  # yuqori chegara logit (juda yuqori ball)
-            else:  # hammasiga xato javob
+            elif total == 0:  # hammasiga xato javob
                 theta[aid] = -4.0
+            else:
+                # Faqat baholanadigan savol umuman qolmaganda (juda kichik guruh)
+                # shu yerga keladi: to'g'ri javoblar ulushidan taxminiy logit
+                theta[aid] = max(-4.0, min(4.0, math.log((total + 0.5) / (n - total + 0.5))))
+
+    # Hamma to'g'ri / hamma xato javob bergan savollar: o'rtacha (0) emas, eng
+    # oson / eng qiyin deb belgilanadi (hisobotda adashtirmasligi uchun)
+    for qid in question_ids:
+        if qid not in estimable_items:
+            pairs = item_answers[qid]
+            if pairs and all(x == 1 for _, x in pairs):
+                b[qid] = -MAX_LOGIT
+            elif pairs and all(x == 0 for _, x in pairs):
+                b[qid] = MAX_LOGIT
 
     # DIQQAT: 75 — bu shkalaning "markazi atrofidagi" nazariy ko'rsatkichi,
     # QATTIQ YUQORI CHEGARA EMAS — haqiqiy tizimda ham juda yaxshi natija
