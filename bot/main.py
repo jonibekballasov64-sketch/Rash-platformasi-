@@ -16,6 +16,7 @@ from bot.handlers.admin.create_test import router as admin_create_test_router
 from bot.handlers.admin.edit_test import router as admin_edit_test_router
 from bot.handlers.admin.my_tests import router as admin_my_tests_router
 from bot.handlers.student.start import router as student_start_router
+from bot.services.test_import import import_pending_tests
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 async def main() -> None:
     await init_db()
+    await import_pending_tests()
 
     bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())

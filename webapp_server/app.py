@@ -239,10 +239,30 @@ def _answer_key(text: str | None) -> str:
     return _norm_answer(text).replace("'", "")
 
 
+_QUOTE_VARIANTS = str.maketrans(
+    {"«": '"', "»": '"', "“": '"', "”": '"', "„": '"', "-": "–", "—": "–", "−": "–"}
+)
+
+
+def _punct_only_key(text: str | None) -> str:
+    """Faqat tinish belgilaridan iborat javoblar uchun kalit (bo'shliqlar,
+    tire va qo'shtirnoq variantlari e'tiborga olinmaydi)."""
+    s = unicodedata.normalize("NFKC", text or "")
+    s = re.sub(r"\s+", "", s)
+    return s.translate(_QUOTE_VARIANTS)
+
+
 def _matches_any(given: str, accepted: list[str] | None) -> bool:
     g_norm, g_key = _norm_answer(given), _answer_key(given)
     if not g_norm:
-        return False
+        # Javob faqat tinish belgilaridan iborat bo'lishi mumkin (masalan
+        # "“ , – , ” , – ."): bunda belgilar ketma-ketligi solishtiriladi.
+        g_punct = _punct_only_key(given)
+        if not g_punct:
+            return False
+        return any(
+            not _norm_answer(a) and _punct_only_key(a) == g_punct for a in (accepted or [])
+        )
     for a in accepted or []:
         if g_norm == _norm_answer(a) or (g_key and g_key == _answer_key(a)):
             return True
