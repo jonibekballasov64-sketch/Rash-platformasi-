@@ -568,7 +568,7 @@
    "order_no": 41,
    "question_type": "two_part_short",
    "text": "**Gaplarni mazmun va grammatik jihatdan to‘g‘ri bog‘lab, qo‘shma gap hosil qiling va quyidagi savollarga javob yozing.**\n__1. Ustoz ta’kidladi. 2. Kitob o‘qiysan. 3. Dunyoqarashing kengayadi.__",
-   "part_a_text": "**2- va 3-gaplarni bog‘lash uchun 2-gap kesimiga qo‘shiladigan qo‘shimchani yozing.**",
+   "part_a_text": "**2- va 3-gaplardan ergashgan qo‘shma gap hosil qilish uchun 2-gap kesimiga qo‘shilishi kerak bo‘lgan qo‘shimchani yozing.**",
    "accepted_answers": [
     "-SA",
     "SA"
