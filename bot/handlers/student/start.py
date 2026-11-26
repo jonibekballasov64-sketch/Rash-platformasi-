@@ -85,5 +85,38 @@ async def cmd_start(message: Message, bot: Bot) -> None:
             "Sizda tugallanmagan test bor. <b>«🔄 Davom ettirish»</b> tugmasini bosib test kodini kiriting — "
             "uzilgan joyingizdan davom etasiz."
         )
+    if message.from_user.id in settings.admin_id_list:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🛠 Admin panel",
+                    web_app=WebAppInfo(url=f"{settings.webapp_base_url}/admin?v=9"),
+                )
+            ]
+        )
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.message(Command("admin", "panel"))
+async def cmd_admin_panel(message: Message) -> None:
+    if message.from_user.id not in settings.admin_id_list:
+        return
+    if not settings.webapp_base_url:
+        await message.answer("⚠️ WEBAPP_BASE_URL sozlanmagan.")
+        return
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🛠 Admin panelni ochish",
+                    web_app=WebAppInfo(url=f"{settings.webapp_base_url}/admin?v=9"),
+                )
+            ]
+        ]
+    )
+    await message.answer(
+        "🛠 <b>Admin panel</b>\nYaratilgan testlar, tahrirlash, to'xtatish, natijalar.",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )

@@ -96,6 +96,11 @@ async def serve_test_page() -> FileResponse:
 _NO_CACHE = {"Cache-Control": "no-store, max-age=0"}
 
 
+@app.get("/admin")
+async def serve_admin_page() -> FileResponse:
+    return FileResponse(str(WEBAPP_DIR / "admin.html"), headers=_NO_CACHE)
+
+
 @app.get("/register")
 async def serve_register_page() -> FileResponse:
     return FileResponse(str(WEBAPP_DIR / "register.html"), headers=_NO_CACHE)
@@ -897,3 +902,9 @@ async def check_pause_status(attempt_id: int) -> dict[str, Any]:
             "pause_reason": attempt.pause_reason,
             "remaining_seconds": remaining_seconds,
 }
+
+
+# Admin paneli API (webapp_server/admin.py) — _verify_init_data yuqorida aniqlangandan keyin ulanadi
+from webapp_server.admin import router as _admin_router  # noqa: E402
+
+app.include_router(_admin_router)

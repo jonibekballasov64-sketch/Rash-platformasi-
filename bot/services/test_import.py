@@ -52,26 +52,10 @@ async def _import_one(spec: dict, admin_telegram_id: int) -> None:
     code = spec["code"]
     async with get_session() as session:
         exists = await session.execute(select(Test.id).where(Test.code == code))
-        test_id = exists.scalar_one_or_none()
-        if test_id is not None:
-            # Test bor: faqat savol MATNLARI/javob kalitlari JSON bilan
-            # sinxronlanadi (tahrirlar shu orqali kiradi). Urinishlar va
-            # o'quvchi javoblariga tegilmaydi.
-            rows = (await session.execute(select(Question).where(Question.test_id == test_id))).scalars().all()
-            by_no = {r.order_no: r for r in rows}
-            changed = 0
-            fields = ("text", "options", "correct_option", "accepted_answers", "part_a_text",
-                      "part_b_text", "part_b_accepted_answers", "part_b_explanation", "explanation")
-            for q in spec["questions"]:
-                row = by_no.get(q["order_no"])
-                if row is None:
-                    continue
-                for f in fields:
-                    if f in q and getattr(row, f) != q[f]:
-                        setattr(row, f, q[f])
-                        changed += 1
-            await session.commit()
-            logger.info("AUTO-IMPORT: %s bor; sinxronlandi (%d maydon o'zgardi)", code, changed)
+        if exists.scalar_one_or_none() is not None:
+            # Test bor — tahrirlar endi admin paneldan (/admin) qilinadi, shuning
+            # uchun JSON bilan qayta yozilmaydi.
+            logger.info("AUTO-IMPORT: %s allaqachon bor, o'tkazib yuborildi", code)
             return
 
         res = await session.execute(
