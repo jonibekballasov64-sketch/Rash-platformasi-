@@ -52,7 +52,13 @@ async def cmd_start(message: Message, bot: Bot) -> None:
             )
         ]
     ]
-    text = "Assalomu alaykum! Testni boshlash uchun «Test ishlash» tugmasini bosing."
+    text = (
+        "🌟 <b>Nargiza Olimovna akademiyasi</b>\n"
+        "<i>Milliy sertifikat · Onlayn test platformasi</i>\n\n"
+        "Assalomu alaykum! Testni boshlash uchun pastdagi <b>«✅ Test ishlash»</b> tugmasini bosing.\n\n"
+        "📝 Test faqat <b>bir marta</b> topshiriladi\n"
+        "⏱ Uzilib qolsangiz — davom ettirish mumkin"
+    )
     # «Davom ettirish» faqat tugallanmagan testi bor o'quvchilarga ko'rinadi
     async with get_session() as session:
         pending = await session.execute(
@@ -75,8 +81,9 @@ async def cmd_start(message: Message, bot: Bot) -> None:
             ]
         )
         text = (
-            "Sizda tugallanmagan test bor. «Davom ettirish» tugmasini bosib test kodini kiriting — "
+            "🌟 <b>Nargiza Olimovna akademiyasi</b>\n\n"
+            "Sizda tugallanmagan test bor. <b>«🔄 Davom ettirish»</b> tugmasini bosib test kodini kiriting — "
             "uzilgan joyingizdan davom etasiz."
         )
     keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
-    await message.answer(text, reply_markup=keyboard)
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
