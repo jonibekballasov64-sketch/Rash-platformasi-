@@ -89,17 +89,21 @@ if WEBAPP_DIR.exists():
 
 @app.get("/test")
 async def serve_test_page() -> FileResponse:
-    return FileResponse(str(WEBAPP_DIR / "index.html"))
+    return FileResponse(str(WEBAPP_DIR / "index.html"), headers=_NO_CACHE)
+
+
+# Telegram WebView sahifani keshlab qo'yib, eski dizaynni ko'rsatib yubormasligi uchun
+_NO_CACHE = {"Cache-Control": "no-store, max-age=0"}
 
 
 @app.get("/register")
 async def serve_register_page() -> FileResponse:
-    return FileResponse(str(WEBAPP_DIR / "register.html"))
+    return FileResponse(str(WEBAPP_DIR / "register.html"), headers=_NO_CACHE)
 
 
 @app.get("/review")
 async def serve_review_page() -> FileResponse:
-    return FileResponse(str(WEBAPP_DIR / "review.html"))
+    return FileResponse(str(WEBAPP_DIR / "review.html"), headers=_NO_CACHE)
 
 
 # --------------------------------------------------------------------------- #

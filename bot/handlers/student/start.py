@@ -48,7 +48,7 @@ async def cmd_start(message: Message, bot: Bot) -> None:
         [
             InlineKeyboardButton(
                 text="✅ Test ishlash",
-                web_app=WebAppInfo(url=f"{settings.webapp_base_url}/register"),
+                web_app=WebAppInfo(url=f"{settings.webapp_base_url}/register?v=8"),
             )
         ]
     ]
@@ -76,7 +76,7 @@ async def cmd_start(message: Message, bot: Bot) -> None:
             [
                 InlineKeyboardButton(
                     text="🔄 Davom ettirish",
-                    web_app=WebAppInfo(url=f"{settings.webapp_base_url}/register?resume=1"),
+                    web_app=WebAppInfo(url=f"{settings.webapp_base_url}/register?resume=1&v=8"),
                 )
             ]
         )
