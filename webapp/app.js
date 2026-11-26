@@ -346,11 +346,6 @@ function attachHandlers(q) {
           input.value = up;
           try { input.setSelectionRange(start, end); } catch (e) {}
         }
-        // Har yozganda ham saqlaymiz (blur kutilmaydi), shunda javob yo'qolmaydi
-        const sub = input.dataset.sub || null;
-        state.answers[answerKey(q.id, sub)] = input.value;
-        clearTimeout(input._t);
-        input._t = setTimeout(() => saveAnswer(q.id, sub, input.value), 500);
       });
       input.addEventListener("blur", () => {
         const sub = input.dataset.sub || null;
