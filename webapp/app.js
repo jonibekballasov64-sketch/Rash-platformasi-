@@ -416,7 +416,7 @@ els.finishBtn.addEventListener("click", requestFinish);
 // --- Vaqtincha to'xtatish: belgilangan javoblar saqlanadi, vaqt to'xtaydi,
 // oyna yopiladi. Keyin botdagi "Davom ettirish" orqali shu joydan davom etiladi.
 async function pauseTest() {
-  if (state.manualPaused) return;
+  if (state.manualPaused || state.finishing) return;
   if (!confirm("Test vaqtincha to'xtatiladi: javoblaringiz saqlanadi, vaqt to'xtaydi va oyna yopiladi. Davom ettirish uchun botdagi «Davom ettirish» tugmasi va test kodidan foydalanasiz. To'xtatamizmi?")) return;
   state.manualPaused = true;
   clearInterval(state.timerInterval);
@@ -472,6 +472,10 @@ async function finishTest(auto) {
   await Promise.allSettled(pending);
   document.getElementById("nav-bar").style.display = "none";
   els.finishBtn.disabled = true;
+  // Yakunlash tasdiqlangach "To'xtatish" ham, "Yakunlash" ham ko'rinmaydi
+  state.manualPaused = true; // pagehide/heartbeat signallari endi yuborilmaydi
+  els.pauseBtn.style.display = "none";
+  els.finishBtn.style.display = "none";
 
   // --- Kutish ekrani: esse AI orqali tekshirilishi bir necha soniya
   // olishi mumkin, shu payt oynani yopib qo'ymasligi uchun ogohlantiramiz.
