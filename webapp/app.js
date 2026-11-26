@@ -346,6 +346,11 @@ function attachHandlers(q) {
           input.value = up;
           try { input.setSelectionRange(start, end); } catch (e) {}
         }
+        // Har yozganda ham saqlaymiz (blur kutilmaydi), shunda javob yo'qolmaydi
+        const sub = input.dataset.sub || null;
+        state.answers[answerKey(q.id, sub)] = input.value;
+        clearTimeout(input._t);
+        input._t = setTimeout(() => saveAnswer(q.id, sub, input.value), 500);
       });
       input.addEventListener("blur", () => {
         const sub = input.dataset.sub || null;
@@ -422,6 +427,12 @@ async function requestFinish() {
 
 async function finishTest(auto) {
   clearInterval(state.timerInterval);
+  // Yakunlashdan oldin ekrandagi (hali saqlanmagan) javobni ham yuboramiz
+  const pending = [];
+  document.querySelectorAll(".short-answer-input[data-qid]").forEach((inp) => {
+    if (inp.value) pending.push(saveAnswer(Number(inp.dataset.qid), inp.dataset.sub || null, inp.value));
+  });
+  await Promise.allSettled(pending);
   document.getElementById("nav-bar").style.display = "none";
   els.finishBtn.disabled = true;
 
