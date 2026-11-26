@@ -103,7 +103,10 @@ function renderItem(item) {
       html += `<div class="review-unanswered">Siz bu savolga javob belgilamagansiz.</div>`;
     }
   } else {
-    html += `<div>Sizning javobingiz: <strong>${answered ? renderFramedText(item.given_answer) : "-"}</strong></div>`;
+    const ok = answered && item.is_correct;
+    const cls = !answered ? "ans-empty" : ok ? "ans-ok" : "ans-bad";
+    const mark = !answered ? "➖" : ok ? "✅" : "❌";
+    html += `<div class="my-answer ${cls}">${mark} Sizning javobingiz: <strong>${answered ? renderFramedText(item.given_answer) : "-"}</strong></div>`;
     if (item.correct_answer_display) {
       html += `<div class="review-answer-line">✅ Javob: <strong>${renderFramedText(item.correct_answer_display)}</strong></div>`;
     }
