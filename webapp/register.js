@@ -25,6 +25,7 @@ let resumeMode = new URLSearchParams(location.search).get("resume") === "1";
 const modeNew = document.getElementById("mode-new");
 const modeResume = document.getElementById("mode-resume");
 function applyMode() {
+  document.getElementById("mode-switch").classList.toggle("hidden", !resumeMode);
   modeNew.classList.toggle("active", !resumeMode);
   modeResume.classList.toggle("active", resumeMode);
   document.getElementById("name-block").classList.toggle("hidden", resumeMode);

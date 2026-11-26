@@ -22,6 +22,7 @@ const state = {
 const els = {
   timer: document.getElementById("timer"),
   finishBtn: document.getElementById("finish-btn"),
+  pauseBtn: document.getElementById("pause-btn"),
   area: document.getElementById("question-area"),
   prevBtn: document.getElementById("prev-btn"),
   nextBtn: document.getElementById("next-btn"),
@@ -73,15 +74,16 @@ function answerKey(qid, subPart) {
 // davom ettiriladi (register ekranidagi "Davom ettirish").
 function setupDisconnectHandlers() {
   const beat = () => {
-    if (document.hidden) return;
+    if (document.hidden || state.manualPaused) return;
     api(`/api/attempt/${attemptId}/heartbeat`, {
       method: "POST",
       body: JSON.stringify({ index: state.currentIndex }),
     }).catch(() => {});
   };
   beat();
-  setInterval(beat, 10000);
+  state.heartbeatTimer = setInterval(beat, 10000);
   window.addEventListener("pagehide", () => {
+    if (state.manualPaused) return;
     try {
       const blob = new Blob([JSON.stringify({ reason: "pagehide" })], { type: "application/json" });
       navigator.sendBeacon(`/api/pause-attempt/${attemptId}`, blob);
@@ -410,6 +412,46 @@ els.nextBtn.addEventListener("click", async () => {
 });
 
 els.finishBtn.addEventListener("click", requestFinish);
+
+// --- Vaqtincha to'xtatish: belgilangan javoblar saqlanadi, vaqt to'xtaydi,
+// oyna yopiladi. Keyin botdagi "Davom ettirish" orqali shu joydan davom etiladi.
+async function pauseTest() {
+  if (state.manualPaused) return;
+  if (!confirm("Test vaqtincha to'xtatiladi: javoblaringiz saqlanadi, vaqt to'xtaydi va oyna yopiladi. Davom ettirish uchun botdagi «Davom ettirish» tugmasi va test kodidan foydalanasiz. To'xtatamizmi?")) return;
+  state.manualPaused = true;
+  clearInterval(state.timerInterval);
+  clearInterval(state.heartbeatTimer);
+  els.pauseBtn.disabled = true;
+  els.finishBtn.disabled = true;
+  const pending = [];
+  document.querySelectorAll(".short-answer-input[data-qid]").forEach((inp) => {
+    if (inp.value) pending.push(saveAnswer(Number(inp.dataset.qid), inp.dataset.sub || null, inp.value));
+  });
+  await Promise.allSettled(pending);
+  try {
+    await api(`/api/attempt/${attemptId}/heartbeat`, {
+      method: "POST",
+      body: JSON.stringify({ index: state.currentIndex }),
+    });
+    await api(`/api/pause-attempt/${attemptId}`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "manual" }),
+    });
+  } catch (e) {
+    state.manualPaused = false;
+    els.pauseBtn.disabled = false;
+    els.finishBtn.disabled = false;
+    alert("To'xtatib bo'lmadi, internetni tekshirib qayta urinib ko'ring.");
+    return;
+  }
+  document.getElementById("nav-bar").style.display = "none";
+  els.area.innerHTML = `<div class="paused-screen"><div class="big">⏸</div>
+    <div class="question-text">Test to'xtatildi</div>
+    <p>Belgilagan javoblaringiz saqlandi, vaqt to'xtab turibdi.<br>
+    Vaqtingiz bo'lganda botga kirib <b>«🔄 Davom ettirish»</b> tugmasini bosing va test kodini kiriting.</p></div>`;
+  setTimeout(() => tg?.close(), 2500);
+}
+els.pauseBtn.addEventListener("click", pauseTest);
 
 async function requestFinish() {
   const missing = getUnansweredNumbers();

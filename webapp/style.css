@@ -266,3 +266,9 @@ button:disabled { opacity: .35; cursor: default; box-shadow: none; }
 .my-answer.ans-ok { background: var(--green-bg); border-color: var(--green); color: var(--green); }
 .my-answer.ans-bad { background: var(--red-bg); border-color: var(--red); color: var(--red); }
 .my-answer.ans-empty { background: #f1f2f5; color: var(--gray); }
+
+.top-actions { display: flex; gap: 8px; }
+button.pause { background: transparent; color: var(--gold); border: 1px solid var(--gold); box-shadow: none; }
+.paused-screen { text-align: center; padding: 40px 18px; }
+.paused-screen .big { font-size: 44px; }
+.paused-screen p { line-height: 1.6; }

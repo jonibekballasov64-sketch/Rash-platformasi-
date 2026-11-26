@@ -42,6 +42,10 @@ async def pause_attempt(session: AsyncSession, attempt_id: int, reason: str = "n
         return ResumeResult(success=False, attempt=None, message="Urinish topilmadi")
     if attempt.status != AttemptStatus.IN_PROGRESS:
         return ResumeResult(success=False, attempt=None, message="Urinish yakunlangan")
+    # O'quvchi "Vaqtincha to'xtatish"ni o'zi bosgan bo'lsa, keyin kelgan
+    # pagehide signali uni bekor qilib yubormasligi kerak.
+    if attempt.pause_reason == "manual" and attempt.paused_at is not None and reason != "manual":
+        return ResumeResult(success=True, attempt=attempt, message="Allaqachon to'xtatilgan")
     attempt.paused_at = dt.datetime.utcnow()
     attempt.pause_reason = reason
     await session.commit()
@@ -81,7 +85,10 @@ async def apply_resume(session: AsyncSession, attempt: Attempt) -> int:
     if left_at is not None and left_at < deadline:
         away = now - left_at
         grace = dt.timedelta(minutes=RESUME_GRACE_MINUTES)
-        credit = min(max(away, dt.timedelta(0)), grace)
+        away = max(away, dt.timedelta(0))
+        # Qo'lda "vaqtincha to'xtatish": vaqt to'liq to'xtab turadi.
+        # To'satdan uzilish: faqat RESUME_GRACE_MINUTES gacha qaytariladi.
+        credit = away if attempt.pause_reason == "manual" else min(away, grace)
         deadline = deadline + credit
         attempt.deadline_at = deadline
 

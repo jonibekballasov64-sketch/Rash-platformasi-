@@ -5,13 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Milliy sertifikat testi</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="/static/style.css?v=6" />
+<link rel="stylesheet" href="/static/style.css?v=7" />
 </head>
 <body>
   <div id="app">
     <header id="top-bar">
       <span id="timer">--:--:--</span>
-      <button id="finish-btn" class="danger small">Yakunlash</button>
+      <div class="top-actions">
+        <button id="pause-btn" class="small pause">⏸ To'xtatish</button>
+        <button id="finish-btn" class="danger small">Yakunlash</button>
+      </div>
     </header>
 
     <main id="question-area">
@@ -35,6 +38,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=7"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

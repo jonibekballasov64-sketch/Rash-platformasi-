@@ -12,7 +12,11 @@ from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 
+from sqlalchemy import select
+
 from bot.config import settings
+from bot.db.base import get_session
+from bot.db.models import Attempt, AttemptStatus, LearnerUser
 
 router = Router(name="student_start")
 
@@ -40,25 +44,39 @@ async def cmd_start(message: Message, bot: Bot) -> None:
         )
         return
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Test ishlash",
-                    web_app=WebAppInfo(url=f"{settings.webapp_base_url}/register"),
-                )
-            ],
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="✅ Test ishlash",
+                web_app=WebAppInfo(url=f"{settings.webapp_base_url}/register"),
+            )
+        ]
+    ]
+    text = "Assalomu alaykum! Testni boshlash uchun «Test ishlash» tugmasini bosing."
+    # «Davom ettirish» faqat tugallanmagan testi bor o'quvchilarga ko'rinadi
+    async with get_session() as session:
+        pending = await session.execute(
+            select(Attempt.id)
+            .join(LearnerUser, LearnerUser.id == Attempt.learner_id)
+            .where(
+                LearnerUser.telegram_id == message.from_user.id,
+                Attempt.status == AttemptStatus.IN_PROGRESS,
+            )
+            .limit(1)
+        )
+        has_pending = pending.scalar_one_or_none() is not None
+    if has_pending:
+        rows.append(
             [
                 InlineKeyboardButton(
                     text="🔄 Davom ettirish",
                     web_app=WebAppInfo(url=f"{settings.webapp_base_url}/register?resume=1"),
                 )
-            ],
-        ]
-    )
-    await message.answer(
-        "Assalomu alaykum! Testni boshlash uchun «Test ishlash» tugmasini bosing.\n"
-        "Agar test uzilib qolgan bo'lsa — «Davom ettirish» tugmasi va test kodi orqali "
-        "uzilgan joyingizdan davom eting.",
-        reply_markup=keyboard,
-    )
+            ]
+        )
+        text = (
+            "Sizda tugallanmagan test bor. «Davom ettirish» tugmasini bosib test kodini kiriting — "
+            "uzilgan joyingizdan davom etasiz."
+        )
+    keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
+    await message.answer(text, reply_markup=keyboard)
