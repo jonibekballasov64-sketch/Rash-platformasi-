@@ -1,52 +1,90 @@
+/* Nargiza Olimovna akademiyasi — navy + oltin dizayn */
 :root {
-  --blue: #1d63d6;
-  --blue-bg: #dbeaff;
-  --yellow-bg: #fff3b0;
-  --green: #1a8a3d;
-  --red: #d1293d;
-  --gray: #666;
+  --navy: #0f1d3a;
+  --navy-2: #1b2f5b;
+  --navy-soft: #e8ecf5;
+  --gold: #c9a24b;
+  --gold-dark: #a8832c;
+  --gold-bg: #fbf3dc;
+  --cream: #f6f4ee;
+  --card: #ffffff;
+  --line: #e4e0d3;
+  --green: #1f8a4c;
+  --green-bg: #e6f6ec;
+  --red: #c8323f;
+  --red-bg: #fdecee;
+  --gray: #6b7385;
+  --text: #17203a;
+  --radius: 14px;
+  --shadow: 0 2px 10px rgba(15, 29, 58, .07);
+
+  /* eski nomlar (boshqa joylarda ishlatilishi mumkin) */
+  --blue: var(--navy);
+  --blue-bg: var(--navy-soft);
+  --yellow-bg: var(--gold-bg);
 }
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 .hidden { display: none !important; }
 
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  background: #f6f7fb;
-  color: #1a1a1a;
+  background: var(--cream);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
 }
 
 #app { display: flex; flex-direction: column; min-height: 100vh; }
 
+/* Brend chizig'i (har bir sahifa tepasida) */
+#app::before {
+  content: "Nargiza Olimovna akademiyasi";
+  display: block; text-align: center;
+  background: var(--navy); color: var(--gold);
+  font-size: 11px; font-weight: 600; letter-spacing: 1.6px; text-transform: uppercase;
+  padding: 7px 10px;
+}
+
 #top-bar {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 14px; background: #fff; border-bottom: 1px solid #e3e3e3;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--navy), var(--navy-2));
+  color: #fff;
+  border-bottom: 3px solid var(--gold);
   position: sticky; top: 0; z-index: 5;
 }
-#timer { font-weight: 700; font-size: 15px; }
+#timer {
+  font-weight: 700; font-size: 17px; letter-spacing: .5px;
+  font-variant-numeric: tabular-nums; color: var(--gold);
+}
 
 button {
-  border: none; border-radius: 8px; padding: 8px 14px; font-size: 14px;
-  cursor: pointer; background: var(--blue); color: #fff;
+  border: none; border-radius: 10px; padding: 10px 16px; font-size: 14px; font-weight: 600;
+  cursor: pointer; background: var(--navy); color: #fff;
+  transition: transform .08s ease, box-shadow .15s ease, background .15s ease;
+  box-shadow: 0 2px 6px rgba(15, 29, 58, .18);
 }
-button.small { padding: 6px 10px; font-size: 12px; }
-button.danger { background: var(--red); }
-button:disabled { opacity: .4; cursor: default; }
+button:active { transform: scale(.97); }
+button.small { padding: 7px 12px; font-size: 12px; }
+button.danger { background: var(--gold); color: var(--navy); box-shadow: none; }
+button:disabled { opacity: .35; cursor: default; box-shadow: none; }
 
-#question-area { flex: 1; padding: 16px; padding-bottom: 90px; }
+#question-area { flex: 1; padding: 16px; padding-bottom: 96px; }
 
 .passage-box {
-  background: #fff; border: 1px solid #e0e0e0; border-radius: 10px;
-  padding: 14px; margin-bottom: 14px; line-height: 1.7; white-space: pre-wrap;
+  background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--gold);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 16px; margin-bottom: 16px; line-height: 1.75; white-space: pre-wrap;
 }
 
-.question-text { font-size: 16px; font-weight: 400; margin-bottom: 12px; line-height: 1.5; white-space: pre-wrap; }
+.question-text {
+  font-size: 16px; font-weight: 400; margin-bottom: 14px; line-height: 1.55;
+  white-space: pre-wrap; color: var(--text);
+}
 
-/* Admin **qalin**/__qiya__ belgilab yuborgan qismlar (savol matni, passage,
-   variantlar, izoh) shu yerda aniq ko'rinishi uchun — .question-text ning
-   o'zi endi oddiy (400) og'irlikda, shu sabab <strong> aniq farq qiladi. */
+/* Admin **qalin**/__qiya__ belgilab yuborgan qismlar */
 .question-text strong,
 .passage-box strong,
 .review-item strong,
@@ -60,82 +98,122 @@ button:disabled { opacity: .4; cursor: default; }
   font-style: italic;
 }
 
-/* 36-39 / 40-44 savollar ichidagi | so'z | ramkalari uchun (admin kiritishda
-   | belgisi bilan ajratgan qismlar shu klass bilan avtomatik konvertatsiya
-   qilinadi, qarang: app.js -> renderFramedWords) */
+/* | so'z | ramkalari */
 .framed-word {
-  display: inline-block; background: var(--blue-bg); color: #000;
-  font-weight: 700; border: 1px solid var(--blue); border-radius: 6px;
-  padding: 2px 8px; margin: 2px 3px;
+  display: inline-block; background: var(--navy-soft); color: var(--navy);
+  font-weight: 700; border: 1px solid var(--navy-2); border-radius: 7px;
+  padding: 2px 9px; margin: 2px 3px;
 }
 
-/* 33-35 moslashtirish savoli uchun qiya + sariq fon */
+/* 33-35 moslashtirish savoli uchun qiya + oltin fon */
 .matching-gap {
-  font-weight: 700; font-style: italic; background: var(--yellow-bg);
-  padding: 1px 6px; border-radius: 4px;
+  font-weight: 700; font-style: italic; background: var(--gold-bg);
+  padding: 1px 7px; border-radius: 5px; border-bottom: 2px solid var(--gold);
 }
 
 .options { display: flex; flex-direction: column; gap: 10px; }
 .option-btn {
-  background: #fff; color: #1a1a1a; border: 2px solid #dcdcdc;
-  border-radius: 10px; padding: 12px 14px; text-align: left; font-size: 15px;
+  background: var(--card); color: var(--text); border: 2px solid var(--line);
+  border-radius: var(--radius); padding: 14px 16px; text-align: left; font-size: 15px;
+  font-weight: 500; box-shadow: var(--shadow);
 }
-.option-btn.selected { border-color: var(--blue); background: var(--blue-bg); }
+.option-btn.selected {
+  border-color: var(--gold); background: var(--gold-bg); color: var(--navy); font-weight: 600;
+  box-shadow: 0 0 0 3px rgba(201, 162, 75, .25);
+}
 
-.matching-table { width: 100%; border-collapse: collapse; margin-top: 6px; background: #fff; }
-.matching-table th, .matching-table td {
-  border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 14px;
+.matching-table {
+  width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 6px;
+  background: var(--card); border-radius: var(--radius); overflow: hidden;
+  border: 1px solid var(--line); box-shadow: var(--shadow);
 }
+.matching-table th, .matching-table td {
+  border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: center; font-size: 14px;
+}
+.matching-table th { background: var(--navy); color: var(--gold); font-weight: 600; }
+.matching-table tr:last-child td { border-bottom: none; }
 .matching-table td:first-child { text-align: left; font-weight: 600; }
 .matching-table th:first-child { text-align: left; }
 .letter-btn {
-  background: #fff; color: #1a1a1a; border: 2px solid #dcdcdc;
-  border-radius: 8px; width: 36px; height: 36px; padding: 0; font-weight: 700;
+  background: var(--card); color: var(--text); border: 2px solid var(--line);
+  border-radius: 10px; width: 38px; height: 38px; padding: 0; font-weight: 700; box-shadow: none;
 }
-.letter-btn.selected { border-color: var(--blue); background: var(--blue-bg); color: var(--blue); }
-.matching-legend { margin-top: 14px; background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; font-size: 14px; }
+.letter-btn.selected { border-color: var(--gold); background: var(--gold-bg); color: var(--navy); }
+.matching-legend {
+  margin-top: 16px; background: var(--card); border: 1px solid var(--line);
+  border-left: 4px solid var(--gold); border-radius: var(--radius);
+  padding: 14px; font-size: 14px; box-shadow: var(--shadow);
+}
 .matching-legend div { margin-bottom: 6px; }
-.matching-select { width: 100%; padding: 6px; font-size: 14px; }
+.matching-select {
+  width: 100%; padding: 8px; font-size: 14px; border: 2px solid var(--line);
+  border-radius: 10px; background: var(--card); color: var(--text);
+}
 
 .short-answer-input {
-  width: 100%; padding: 12px; font-size: 15px; border: 2px solid #dcdcdc;
-  border-radius: 10px;
+  width: 100%; padding: 13px 14px; font-size: 15px; border: 2px solid var(--line);
+  border-radius: var(--radius); background: var(--card); color: var(--text);
+  outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.short-answer-input:focus, .essay-textarea:focus, .matching-select:focus {
+  border-color: var(--gold); box-shadow: 0 0 0 3px rgba(201, 162, 75, .25);
 }
 
 .essay-textarea {
-  width: 100%; min-height: 260px; padding: 12px; font-size: 15px;
-  border: 2px solid #dcdcdc; border-radius: 10px; font-family: inherit;
+  width: 100%; min-height: 260px; padding: 14px; font-size: 15px;
+  border: 2px solid var(--line); border-radius: var(--radius); font-family: inherit;
+  background: var(--card); color: var(--text); outline: none; line-height: 1.6;
 }
-.word-count { font-size: 13px; color: var(--gray); margin-top: 6px; }
+.word-count { font-size: 13px; color: var(--gray); margin-top: 6px; text-align: right; }
 
 #nav-bar {
-  position: fixed; bottom: 0; left: 0; right: 0; background: #fff;
-  border-top: 1px solid #e3e3e3; display: flex; justify-content: space-between;
+  position: fixed; bottom: 0; left: 0; right: 0; background: var(--card);
+  border-top: 3px solid var(--gold); display: flex; justify-content: space-between;
   align-items: center; padding: 10px 14px;
+  box-shadow: 0 -4px 14px rgba(15, 29, 58, .08);
 }
-#progress { font-size: 13px; color: var(--gray); }
+#nav-bar button { min-width: 104px; }
+#progress { font-size: 13px; color: var(--navy); font-weight: 700; }
 
 .modal {
-  position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  position: fixed; inset: 0; background: rgba(15, 29, 58, .6);
   display: flex; align-items: center; justify-content: center; z-index: 20;
+  backdrop-filter: blur(2px);
 }
 .modal.hidden { display: none; }
 .modal-box {
-  background: #fff; border-radius: 12px; padding: 20px; max-width: 320px;
-  text-align: center; white-space: pre-wrap;
+  background: var(--card); border-radius: 18px; padding: 24px; max-width: 330px;
+  text-align: center; white-space: pre-wrap; border-top: 4px solid var(--gold);
+  box-shadow: 0 12px 40px rgba(15, 29, 58, .35); line-height: 1.5;
 }
-.modal-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: center; }
+.modal-actions { display: flex; gap: 10px; margin-top: 18px; justify-content: center; }
+.modal-actions button:last-child { background: var(--navy-soft); color: var(--navy); box-shadow: none; }
 
-/* Att.Diagnostika botidagi kabi: oddiy oq karta, chetida rangli chiziq yo'q */
-.review-item { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; border: 1px solid #e0e0e0; }
-.review-explanation { color: var(--gray); font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
-.review-answer-line { color: var(--green); font-weight: 700; margin-top: 10px; font-size: 15px; }
-.review-unanswered { color: var(--gray); font-size: 13px; margin-top: 6px; }
+/* Javoblar va tahlil */
+.review-item {
+  background: var(--card); border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+}
+.review-explanation {
+  color: var(--navy-2); background: var(--gold-bg); border-radius: 10px;
+  padding: 10px 12px; font-size: 13px; margin-top: 12px; white-space: pre-wrap; line-height: 1.55;
+}
+.review-answer-line { color: var(--green); font-weight: 700; margin-top: 12px; font-size: 15px; }
+.review-unanswered { color: var(--gray); font-size: 13px; margin-top: 8px; }
 
-.review-options { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.review-options { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
 .review-option {
-  border: 2px solid #dcdcdc; border-radius: 10px; padding: 10px 12px; font-size: 14px;
-  background: #fff; color: #1a1a1a;
+  border: 2px solid var(--line); border-radius: 12px; padding: 11px 13px; font-size: 14px;
+  background: var(--card); color: var(--text);
 }
-.review-option.correct-answer { border-color: var(--green); background: #e3f8e9; }
-.review-option.wrong-selected { border-color: var(--red); background: #fdeaec; }
+.review-option.correct-answer { border-color: var(--green); background: var(--green-bg); }
+.review-option.wrong-selected { border-color: var(--red); background: var(--red-bg); }
+
+/* Ro'yxatdan o'tish sahifasi */
+#reg-form .question-text { font-weight: 600; color: var(--navy); margin-bottom: 8px; }
+#reg-error { color: var(--red) !important; font-weight: 500; }
+#reg-submit, #reg-start-btn, #view-review-btn {
+  background: linear-gradient(135deg, var(--navy), var(--navy-2));
+  color: var(--gold); border-radius: 12px; font-size: 16px;
+  border-bottom: 3px solid var(--gold);
+}
