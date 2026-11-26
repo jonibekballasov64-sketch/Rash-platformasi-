@@ -217,3 +217,47 @@ button:disabled { opacity: .35; cursor: default; box-shadow: none; }
   color: var(--gold); border-radius: 12px; font-size: 16px;
   border-bottom: 3px solid var(--gold);
 }
+
+
+/* ===== v5: yangi dizayn ===== */
+.reg-main { padding: 0 0 28px !important; }
+.hero {
+  text-align: center; color: #fff; padding: 30px 20px 54px;
+  background: radial-gradient(circle at 50% 0%, var(--navy-2), var(--navy) 70%);
+  border-bottom: 3px solid var(--gold);
+}
+.hero h1 { margin: 12px 0 4px; font-size: 24px; letter-spacing: .5px; color: var(--gold); font-family: Georgia, "Times New Roman", serif; }
+.hero p { margin: 0; font-size: 13px; opacity: .85; }
+.monogram {
+  width: 74px; height: 74px; margin: 0 auto; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font: 700 34px Georgia, serif; color: var(--navy);
+  background: linear-gradient(135deg, #e8c971, var(--gold-dark));
+  box-shadow: 0 0 0 4px rgba(201,162,75,.25), 0 6px 18px rgba(0,0,0,.35);
+}
+.monogram span { font-size: 22px; margin-left: 1px; }
+.card {
+  background: var(--card); margin: -32px 14px 0; padding: 18px 16px 20px;
+  border-radius: 18px; box-shadow: 0 8px 28px rgba(15,29,58,.15); border: 1px solid var(--line);
+}
+.card + .card { margin-top: 14px; }
+.mode-switch { display: flex; gap: 6px; background: var(--navy-soft); padding: 4px; border-radius: 12px; margin-bottom: 16px; }
+.mode-btn {
+  flex: 1; border: 0; padding: 10px 6px; border-radius: 9px; font-size: 14px; font-weight: 600;
+  background: transparent; color: var(--navy); cursor: pointer;
+}
+.mode-btn.active { background: var(--navy); color: var(--gold); box-shadow: var(--shadow); }
+.field-label { display: block; font-weight: 700; color: var(--navy); margin: 14px 0 6px; font-size: 14px; }
+.card input.short-answer-input { width: 100%; }
+.reg-error { color: var(--red); margin-top: 12px; white-space: pre-wrap; font-size: 14px; }
+.hint { background: var(--gold-bg); border: 1px solid var(--gold); color: #5c4a14; border-radius: 10px; padding: 10px 12px; font-size: 13px; margin: 14px 0 0; }
+.confirm-text { white-space: pre-wrap; line-height: 1.55; font-size: 15px; color: var(--text); }
+.gold-btn {
+  margin-top: 18px; width: 100%; padding: 15px; border: 0; border-radius: 12px;
+  font-size: 16px; font-weight: 700; color: var(--navy); cursor: pointer;
+  background: linear-gradient(135deg, #ecd07f, var(--gold) 55%, var(--gold-dark));
+  box-shadow: 0 4px 12px rgba(168,131,44,.4);
+}
+.gold-btn:disabled { opacity: .6; }
+.short-answer-input { text-transform: none; }
+.question-text { font-size: 16px; }

@@ -40,7 +40,7 @@ from typing import Any
 from urllib.parse import parse_qsl
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -65,9 +65,15 @@ from bot.db.models import (
 )
 from bot.services.essay import NotConfiguredError, format_evaluation_messages, grade_essay
 from bot.services.scoring import MIN_ESSAY_WORDS
-from bot.services.session import pause_attempt, resume_attempt
+from bot.services.session import (
+    RESUME_GRACE_MINUTES,
+    apply_resume,
+    find_resumable_attempt,
+    pause_attempt,
+    touch_attempt,
+)
 
-MAX_ATTEMPTS = 2
+MAX_ATTEMPTS = 1  # har bir o'quvchi testni faqat bir marta topshiradi
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +126,15 @@ class FinishIn(BaseModel):
 
 class RegisterIn(BaseModel):
     init_data: str
-    full_name: str
+    full_name: str = ""
     test_code: str
-    category: str
+    category: str = ""
+    # True bo'lsa: yangi urinish ochilmaydi, uzilib qolgan testni davom ettiradi
+    resume: bool = False
+
+
+class HeartbeatIn(BaseModel):
+    index: int | None = None
 
 
 class PauseAttemptIn(BaseModel):
@@ -291,7 +303,12 @@ def _check_answer(question: Question, sub_part: str | None, given: str) -> bool:
 @app.post("/api/register")
 async def register(payload: RegisterIn) -> dict[str, Any]:
     """Ism-familiya / test kodi / toifani WebApp ichida qabul qilib, Attempt
-    yaratadi — bot chatida hech qanday savol-javob bo'lmaydi."""
+    yaratadi — bot chatida hech qanday savol-javob bo'lmaydi.
+
+    Har bir o'quvchi testni FAQAT BIR MARTA topshiradi. Agar urinish
+    boshlangan-u, tugallanmagan bo'lsa (to'satdan chiqib ketgan), shu kod bilan
+    qayta kirganda yangi urinish emas, o'sha urinish DAVOM ETTIRILADI (vaqt va
+    savol uzilgan joyidan)."""
     tg_user = _verify_init_data(payload.init_data)
     telegram_id = tg_user.get("id")
     if telegram_id is None:
@@ -302,19 +319,6 @@ async def register(payload: RegisterIn) -> dict[str, Any]:
             403, "Botdan foydalanish uchun avval belgilangan guruhga a'zo bo'lishingiz kerak."
         )
 
-    # Ba'zi telefon klaviaturalari "chiroyli shrift" (stilize Unicode)
-    # belgilarini qo'yadi (masalan 𝑵𝑨𝑹𝑮𝑰𝒁𝑨 𝑶𝑳𝑰𝑴𝑶𝑽𝑵𝑨) — bular bazada,
-    # eksportda va admin xabarlarida chiroyli chiqmaydi. NFKC normalizatsiya
-    # ularni oddiy lotin/kirill harflariga aylantiradi.
-    full_name = unicodedata.normalize("NFKC", payload.full_name).strip()
-    if len(full_name) < 3:
-        raise HTTPException(400, "Iltimos, to'liq ism-familiyangizni kiriting.")
-
-    try:
-        category = Category(payload.category)
-    except ValueError:
-        raise HTTPException(400, "Noto'g'ri toifa tanlandi.")
-
     code = payload.test_code.strip().upper()
 
     async with get_session() as session:
@@ -323,13 +327,47 @@ async def register(payload: RegisterIn) -> dict[str, Any]:
 
         if test is None or test.status == TestStatus.DRAFT:
             raise HTTPException(404, "Bunday kod bilan test topilmadi. Qaytadan kiriting.")
-        if test.status == TestStatus.CLOSED:
-            raise HTTPException(400, "Bu test yopilgan, endi urinish qabul qilinmaydi.")
 
         learner_result = await session.execute(
             select(LearnerUser).where(LearnerUser.telegram_id == telegram_id)
         )
         learner = learner_result.scalar_one_or_none()
+
+        # --- Davom ettirish: tugallanmagan urinish bo'lsa, shuni tiklaymiz ---
+        resumable = None
+        if learner is not None:
+            resumable = await find_resumable_attempt(session, test.id, learner.id)
+        is_admin = telegram_id in settings.admin_id_list
+        if resumable is not None and (payload.resume or not is_admin):
+            remaining = await apply_resume(session, resumable)
+            return {
+                "attempt_id": resumable.id,
+                "resumed": True,
+                "attempt_number": resumable.attempt_number,
+                "duration_minutes": test.duration_minutes,
+                "remaining_seconds": max(0, remaining),
+            }
+        if payload.resume:
+            raise HTTPException(
+                404, "Bu kod bo'yicha davom ettiriladigan test topilmadi (u yakunlangan bo'lishi mumkin)."
+            )
+
+        if test.status == TestStatus.CLOSED:
+            raise HTTPException(400, "Bu test yopilgan, endi urinish qabul qilinmaydi.")
+
+        # Ba'zi telefon klaviaturalari "chiroyli shrift" (stilize Unicode)
+        # belgilarini qo'yadi (masalan 𝑵𝑨𝑹𝑮𝑰𝒁𝑨 𝑶𝑳𝑰𝑴𝑶𝑽𝑵𝑨) — bular bazada,
+        # eksportda va admin xabarlarida chiroyli chiqmaydi. NFKC normalizatsiya
+        # ularni oddiy lotin/kirill harflariga aylantiradi.
+        full_name = unicodedata.normalize("NFKC", payload.full_name).strip()
+        if len(full_name) < 3:
+            raise HTTPException(400, "Iltimos, to'liq ism-familiyangizni kiriting.")
+
+        try:
+            category = Category(payload.category)
+        except ValueError:
+            raise HTTPException(400, "Noto'g'ri toifa tanlandi.")
+
         if learner is None:
             learner = LearnerUser(telegram_id=telegram_id, full_name=full_name)
             session.add(learner)
@@ -344,10 +382,9 @@ async def register(payload: RegisterIn) -> dict[str, Any]:
         )
         attempts_so_far = count_result.scalar_one()
 
-        is_admin = telegram_id in settings.admin_id_list
         if not is_admin and attempts_so_far >= MAX_ATTEMPTS:
             raise HTTPException(
-                400, "Siz bu testga allaqachon 2 marta urinib bo'lgansiz. Boshqa urinish mumkin emas."
+                400, "Siz bu testni allaqachon topshirgansiz. Testni faqat bir marta topshirish mumkin."
             )
 
         attempt_number = attempts_so_far + 1
@@ -361,6 +398,8 @@ async def register(payload: RegisterIn) -> dict[str, Any]:
             status=AttemptStatus.IN_PROGRESS,
             started_at=now,
             deadline_at=now + dt.timedelta(minutes=test.duration_minutes),
+            last_seen_at=now,
+            last_index=0,
         )
         session.add(attempt)
         await session.commit()
@@ -368,6 +407,7 @@ async def register(payload: RegisterIn) -> dict[str, Any]:
 
         return {
             "attempt_id": attempt.id,
+            "resumed": False,
             "attempt_number": attempt_number,
             "duration_minutes": test.duration_minutes,
         }
@@ -379,13 +419,21 @@ async def get_attempt(attempt_id: int) -> dict[str, Any]:
         result = await session.execute(
             select(Attempt)
             .where(Attempt.id == attempt_id)
-            .options(selectinload(Attempt.test).selectinload(Test.questions).selectinload(Question.passage))
+            .options(
+                selectinload(Attempt.test).selectinload(Test.questions).selectinload(Question.passage),
+                selectinload(Attempt.answers),
+            )
         )
         attempt = result.scalar_one_or_none()
         if attempt is None:
             raise HTTPException(404, "Urinish topilmadi")
 
         test = attempt.test
+        saved_answers = {
+            f"{a.question_id}:{a.sub_part or ''}": a.given_answer
+            for a in attempt.answers
+            if a.given_answer
+        }
         questions_payload = []
         for q in sorted(test.questions, key=lambda x: x.order_no):
             item: dict[str, Any] = {
@@ -410,6 +458,8 @@ async def get_attempt(attempt_id: int) -> dict[str, Any]:
             "essay_topic": test.essay_topic,
             "essay_min_words": MIN_ESSAY_WORDS,
             "status": attempt.status.value,
+            "last_index": attempt.last_index or 0,
+            "answers": saved_answers,
             "questions": questions_payload,
         }
 
@@ -790,34 +840,33 @@ async def review_attempt(attempt_id: int) -> dict[str, Any]:
 
 
 @app.post("/api/pause-attempt/{attempt_id}")
-async def pause_test_attempt(attempt_id: int, payload: PauseAttemptIn) -> dict[str, Any]:
-    """Test sessiyasini pause qilish (internet uzildi, app yopildi, va h.k.).
-    Frontend bu endpointni beforeunload/offline/visibilitychange eventlarida chaqiradi."""
+async def pause_test_attempt(attempt_id: int, request: Request) -> dict[str, Any]:
+    """Oyna yopilayotganda (pagehide) brauzer yuboradigan signal. sendBeacon
+    tanasi har xil ko'rinishda kelishi mumkin, shuning uchun uni qat'iy
+    o'qimaymiz — faqat "chiqib ketdi" vaqtini belgilaymiz."""
+    reason = "app_closed"
+    try:
+        body = await request.json()
+        reason = str(body.get("reason", reason))[:64]
+    except Exception:
+        pass
     async with get_session() as session:
-        result = await pause_attempt(session, attempt_id, payload.reason)
-        
-        if not result.success:
-            raise HTTPException(400, result.message)
-        
-        # Telegram'ga xabar jo'natish: qolgan vaqt bilan birga
-        attempt = result.attempt
-        if attempt and attempt.learner:
-            remaining_min = result.remaining_seconds // 60 if result.remaining_seconds else 0
-            msg = (
-                f"⏸️ Sizning test ulanishi uzildi.\n\n"
-                f"Qolgan vaqt: {remaining_min} minut\n"
-                f"Bot'da /resume buyrug'ini yozing yoki \"Davom ettirish\" tugmasini bosing."
-            )
-            try:
-                await _send_telegram_message(attempt.learner.telegram_id, msg)
-            except Exception:
-                logger.exception("Pause xabarini yuborishda xato (attempt_id=%s)", attempt_id)
-        
-        return {
-            "success": result.success,
-            "message": result.message,
-            "remaining_seconds": result.remaining_seconds,
-        }
+        result = await pause_attempt(session, attempt_id, reason)
+    return {"success": result.success, "message": result.message}
+
+
+@app.post("/api/attempt/{attempt_id}/heartbeat")
+async def attempt_heartbeat(attempt_id: int, payload: HeartbeatIn) -> dict[str, Any]:
+    """WebApp har ~10 soniyada "tirik"ligini va qaysi ekrandaligini yuboradi."""
+    async with get_session() as session:
+        result = await session.execute(select(Attempt).where(Attempt.id == attempt_id))
+        attempt = result.scalar_one_or_none()
+        if attempt is None:
+            raise HTTPException(404, "Urinish topilmadi")
+        if attempt.status != AttemptStatus.IN_PROGRESS:
+            return {"ok": False, "status": attempt.status.value}
+        await touch_attempt(session, attempt, payload.index)
+        return {"ok": True}
 
 
 @app.get("/api/attempt/{attempt_id}/check-pause")

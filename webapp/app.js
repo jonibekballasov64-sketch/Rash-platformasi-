@@ -68,33 +68,24 @@ function answerKey(qid, subPart) {
   return `${qid}:${subPart || ""}`;
 }
 
-// --- Disconnect handler: Internet ket, browser yopildi, yoki tab hidden bo'lsa
-// automatik pause qilinadi. Qolgan vaqt bilan bot orqali notification yuboriladi.
+// --- Uzilishlar: har ~10 soniyada "tirik"lik signali (heartbeat) yuboriladi,
+// oyna yopilganda esa pagehide signali. Qaytib kirilganda test shu joydan
+// davom ettiriladi (register ekranidagi "Davom ettirish").
 function setupDisconnectHandlers() {
-  // Internet ulanmay ketsa
-  window.addEventListener("offline", () => {
-    navigator.sendBeacon(
-      `/api/pause-attempt/${attemptId}`,
-      JSON.stringify({ reason: "network" })
-    );
-  });
-
-  // Browser yoki tab yopilsa
-  window.addEventListener("beforeunload", () => {
-    navigator.sendBeacon(
-      `/api/pause-attempt/${attemptId}`,
-      JSON.stringify({ reason: "browser_close" })
-    );
-  });
-
-  // Tab hidden bo'lsa (boshqa app'ga o'tsa)
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      navigator.sendBeacon(
-        `/api/pause-attempt/${attemptId}`,
-        JSON.stringify({ reason: "tab_hidden" })
-      );
-    }
+  const beat = () => {
+    if (document.hidden) return;
+    api(`/api/attempt/${attemptId}/heartbeat`, {
+      method: "POST",
+      body: JSON.stringify({ index: state.currentIndex }),
+    }).catch(() => {});
+  };
+  beat();
+  setInterval(beat, 10000);
+  window.addEventListener("pagehide", () => {
+    try {
+      const blob = new Blob([JSON.stringify({ reason: "pagehide" })], { type: "application/json" });
+      navigator.sendBeacon(`/api/pause-attempt/${attemptId}`, blob);
+    } catch (e) {}
   });
 }
 
@@ -112,6 +103,9 @@ async function load() {
   state.questions = state.data.questions;
   state.screens = buildScreens(state.questions);
   state.deadline = new Date(state.data.deadline_at);
+  // Uzilgan joydan davom ettirish: saqlangan javoblar va oxirgi ekran
+  Object.assign(state.answers, state.data.answers || {});
+  state.currentIndex = Math.min(state.data.last_index || 0, totalScreens() - 1);
   setupDisconnectHandlers(); // Disconnect handlerlari o'rnatiladi
   startTimer();
   render();
@@ -271,7 +265,7 @@ function renderSingleChoice(q) {
 function renderShortAnswer(q, subPart) {
   const key = answerKey(q.id, subPart);
   const value = state.answers[key] || "";
-  return `<input class="short-answer-input" data-qid="${q.id}" data-sub="${subPart || ""}" value="${value.replace(/"/g, "&quot;")}" placeholder="Javobingizni yozing" autocapitalize="sentences" />`;
+  return `<input class="short-answer-input" data-qid="${q.id}" data-sub="${subPart || ""}" value="${value.replace(/"/g, "&quot;")}" placeholder="Javobingizni yozing" autocapitalize="characters" autocomplete="off" spellcheck="false" />`;
 }
 
 function renderEssayScreen() {
@@ -344,7 +338,15 @@ function attachHandlers(q) {
     });
   } else {
     els.area.querySelectorAll(".short-answer-input").forEach((input) => {
-      input.addEventListener("input", () => autoCapitalizeFirst(input));
+      input.addEventListener("input", () => {
+        if (input.type === "number") return;
+        const start = input.selectionStart, end = input.selectionEnd;
+        const up = input.value.toUpperCase();
+        if (up !== input.value) {
+          input.value = up;
+          try { input.setSelectionRange(start, end); } catch (e) {}
+        }
+      });
       input.addEventListener("blur", () => {
         const sub = input.dataset.sub || null;
         state.answers[answerKey(q.id, sub)] = input.value;

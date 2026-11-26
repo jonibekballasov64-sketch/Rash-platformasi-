@@ -20,6 +20,21 @@ const els = {
 
 let selectedCategory = null;
 let createdAttemptId = null;
+let resumeMode = new URLSearchParams(location.search).get("resume") === "1";
+
+const modeNew = document.getElementById("mode-new");
+const modeResume = document.getElementById("mode-resume");
+function applyMode() {
+  modeNew.classList.toggle("active", !resumeMode);
+  modeResume.classList.toggle("active", resumeMode);
+  document.getElementById("name-block").classList.toggle("hidden", resumeMode);
+  document.getElementById("category-block").classList.toggle("hidden", resumeMode);
+  document.getElementById("resume-hint").classList.toggle("hidden", !resumeMode);
+  els.submit.textContent = resumeMode ? "🔄 Davom ettirish" : "Davom etish";
+  showError("");
+}
+modeNew.addEventListener("click", () => { resumeMode = false; applyMode(); });
+modeResume.addEventListener("click", () => { resumeMode = true; applyMode(); });
 
 // Telegram profilidan ism-familiyani oldindan to'ldirib qo'yamiz (o'zgartirish mumkin).
 (function prefillName() {
@@ -41,6 +56,7 @@ els.categoryOptions.querySelectorAll(".option-btn").forEach((btn) => {
 function showError(text) {
   els.error.textContent = text;
 }
+applyMode();
 
 els.submit.addEventListener("click", async () => {
   showError("");
@@ -48,7 +64,7 @@ els.submit.addEventListener("click", async () => {
   const fullName = els.fullName.value.trim();
   const testCode = els.testCode.value.trim().toUpperCase();
 
-  if (fullName.length < 3) {
+  if (!resumeMode && fullName.length < 3) {
     showError("Iltimos, to'liq ism-familiyangizni kiriting.");
     return;
   }
@@ -56,7 +72,7 @@ els.submit.addEventListener("click", async () => {
     showError("Iltimos, test kodini kiriting.");
     return;
   }
-  if (!selectedCategory) {
+  if (!resumeMode && !selectedCategory) {
     showError("Iltimos, toifangizni belgilang.");
     return;
   }
@@ -73,9 +89,10 @@ els.submit.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         init_data: tg.initData,
-        full_name: fullName,
+        full_name: resumeMode ? "" : fullName,
         test_code: testCode,
-        category: selectedCategory,
+        category: resumeMode ? "" : selectedCategory,
+        resume: resumeMode,
       }),
     });
     const body = await res.json().catch(() => ({}));
@@ -86,11 +103,13 @@ els.submit.addEventListener("click", async () => {
 
     createdAttemptId = body.attempt_id;
 
-    let warning = `⏰ Sizga ${Math.floor(body.duration_minutes / 60)} soat vaqt beriladi, vaqtni to'xtatib bo'lmaydi.\nBu sizning ${body.attempt_number}-urinishingiz (jami 2 marta urinish mumkin).`;
-    if (body.attempt_number === 1) {
-      warning += "\n\n⚠️ 1-urinish ustozga ko'rinadi va sizning rasmiy natijangiz hisoblanadi.";
+    let warning;
+    if (body.resumed) {
+      const rem = Math.floor((body.remaining_seconds || 0) / 60);
+      warning = `🔄 Testingiz uzilgan joyidan davom ettiriladi.\n⏳ Qolgan vaqt: taxminan ${rem} daqiqa.\nOldin yozgan javoblaringiz saqlangan.`;
+      els.startBtn.textContent = "▶️ Davom ettirish";
     } else {
-      warning += "\n\n⚠️ Bu 2-urinish — faqat o'zingiz uchun, rasmiy natijaga ta'sir qilmaydi.";
+      warning = `⏰ Sizga ${Math.floor(body.duration_minutes / 60)} soat vaqt beriladi, vaqtni to'xtatib bo'lmaydi.\n\n⚠️ Test faqat BIR MARTA topshiriladi. Agar internet uzilsa yoki Telegram yopilib qolsa — botda «Davom ettirish» tugmasi va test kodi orqali qolgan joyingizdan davom eting.`;
     }
     els.confirmWarning.textContent = warning;
 

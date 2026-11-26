@@ -218,6 +218,11 @@ class Attempt(Base):
     # paused_at to'ldirilganda, "Davom ettirish" tugmasi ko'rsatiladi
     paused_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pause_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)  # "network", "app_closed", etc.
+    # Oxirgi "tirik" signal (WebApp har ~10 soniyada yuboradi) va o'quvchi qaysi
+    # ekranda turgani: to'satdan uzilib qolsa, davom ettirishda vaqt va savol
+    # shu joydan tiklanadi.
+    last_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_index: Mapped[int] = mapped_column(Integer, default=0)
 
     test: Mapped[Test] = relationship(back_populates="attempts")
     learner: Mapped[LearnerUser] = relationship(back_populates="attempts")

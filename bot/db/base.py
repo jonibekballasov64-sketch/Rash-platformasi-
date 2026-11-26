@@ -40,6 +40,19 @@ async def init_db() -> None:
         await conn.execute(
             text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS part_a_text TEXT")
         )
+        # Uzilib qolgan testni davom ettirish uchun (oxirgi signal vaqti va ekran raqami)
+        await conn.execute(
+            text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ")
+        )
+        await conn.execute(
+            text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS pause_reason VARCHAR(64)")
+        )
+        await conn.execute(
+            text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ")
+        )
+        await conn.execute(
+            text("ALTER TABLE attempts ADD COLUMN IF NOT EXISTS last_index INTEGER DEFAULT 0")
+        )
 
 
 @asynccontextmanager
