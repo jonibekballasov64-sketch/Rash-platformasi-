@@ -542,7 +542,9 @@
    "text": "**Gapda ajratib ko‘rsatilgan birlik qanday sintaktik vazifa bajargan?**\n__Biz, |sinfning eng yosh a’zolari|, tanlovda birinchi o‘rinni egalladik.__",
    "accepted_answers": [
     "IZOHLOVCHI",
-    "AJRATILGAN IZOHLOVCHI"
+    "AJRATILGAN IZOHLOVCHI",
+    "AJRATILGAN BO'LAK",
+    "AJRATILGAN BO‘LAK"
    ],
    "explanation": "Birikma «biz» olmoshini izohlab, qaysi shaxslar nazarda tutilganini aniqlashtiradi va vergul bilan ajratilgan.",
    "passage_type": null
