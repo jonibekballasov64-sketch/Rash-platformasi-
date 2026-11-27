@@ -73,22 +73,47 @@ function answerKey(qid, subPart) {
 // oyna yopilganda esa pagehide signali. Qaytib kirilganda test shu joydan
 // davom ettiriladi (register ekranidagi "Davom ettirish").
 function setupDisconnectHandlers() {
-  const beat = () => {
+  state.lastBeatOk = Date.now();
+  const beat = async () => {
     if (document.hidden || state.manualPaused) return;
-    api(`/api/attempt/${attemptId}/heartbeat`, {
-      method: "POST",
-      body: JSON.stringify({ index: state.currentIndex }),
-    }).catch(() => {});
+    try {
+      await api(`/api/attempt/${attemptId}/heartbeat`, {
+        method: "POST",
+        body: JSON.stringify({ index: state.currentIndex }),
+      });
+      // Aloqa uzilib qaytgan bo'lsa (signal 25 soniyadan ko'p kelmagan) —
+      // uzilgan vaqt serverda qaytariladi va soat qayta o'rnatiladi.
+      if (Date.now() - state.lastBeatOk > 25000) await syncDeadline();
+      state.lastBeatOk = Date.now();
+    } catch (e) {}
   };
   beat();
   state.heartbeatTimer = setInterval(beat, 10000);
-  window.addEventListener("pagehide", () => {
+
+  const sendPause = (reason) => {
     if (state.manualPaused) return;
     try {
-      const blob = new Blob([JSON.stringify({ reason: "pagehide" })], { type: "application/json" });
+      const blob = new Blob([JSON.stringify({ reason })], { type: "application/json" });
       navigator.sendBeacon(`/api/pause-attempt/${attemptId}`, blob);
     } catch (e) {}
+  };
+  window.addEventListener("pagehide", () => sendPause("pagehide"));
+  // Telegram yig'ilsa / boshqa ilovaga o'tilsa — vaqt to'xtaydi, qaytganda davom etadi
+  document.addEventListener("visibilitychange", () => {
+    if (state.manualPaused) return;
+    if (document.hidden) sendPause("hidden");
+    else syncDeadline().then(() => { state.lastBeatOk = Date.now(); });
   });
+  window.addEventListener("online", () => { if (!state.manualPaused) syncDeadline(); });
+}
+
+// Serverdan qolgan vaqtni so'rab, soatni yangilaydi (uzilgan vaqt qaytariladi)
+async function syncDeadline() {
+  if (state.manualPaused) return;
+  try {
+    const r = await api(`/api/attempt/${attemptId}/resume`, { method: "POST" });
+    if (r.remaining_seconds != null) state.deadline = new Date(Date.now() + r.remaining_seconds * 1000);
+  } catch (e) {}
 }
 
 async function load() {
@@ -136,8 +161,17 @@ function buildScreens(questions) {
 }
 
 function startTimer() {
-  const tick = () => {
-    const remainMs = state.deadline - new Date();
+  const tick = async () => {
+    if (state.manualPaused || state.timerChecking) return;
+    let remainMs = state.deadline - new Date();
+    if (remainMs <= 0) {
+      // Vaqt tugadi deb yakunlashdan oldin serverdan tekshiramiz: o'quvchi
+      // aloqa uzilgan/yig'ilgan bo'lsa, uzilgan vaqt qaytariladi.
+      state.timerChecking = true;
+      await syncDeadline();
+      state.timerChecking = false;
+      remainMs = state.deadline - new Date();
+    }
     if (remainMs <= 0) {
       els.timer.textContent = "00:00:00";
       clearInterval(state.timerInterval);

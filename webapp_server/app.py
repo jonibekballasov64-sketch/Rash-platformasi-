@@ -66,7 +66,6 @@ from bot.db.models import (
 from bot.services.essay import NotConfiguredError, format_evaluation_messages, grade_essay
 from bot.services.scoring import MIN_ESSAY_WORDS
 from bot.services.session import (
-    RESUME_GRACE_MINUTES,
     apply_resume,
     find_resumable_attempt,
     pause_attempt,
@@ -862,6 +861,21 @@ async def pause_test_attempt(attempt_id: int, request: Request) -> dict[str, Any
     async with get_session() as session:
         result = await pause_attempt(session, attempt_id, reason)
     return {"success": result.success, "message": result.message}
+
+
+@app.post("/api/attempt/{attempt_id}/resume")
+async def attempt_resume(attempt_id: int) -> dict[str, Any]:
+    """Oyna ichida aloqa uzilib qaytganda / Telegram yig'ilib ochilganda
+    chaqiriladi: uzilgan vaqt deadline'ga qo'shiladi, yangi deadline qaytadi."""
+    async with get_session() as session:
+        result = await session.execute(select(Attempt).where(Attempt.id == attempt_id))
+        attempt = result.scalar_one_or_none()
+        if attempt is None:
+            raise HTTPException(404, "Urinish topilmadi")
+        if attempt.status != AttemptStatus.IN_PROGRESS:
+            return {"status": attempt.status.value}
+        remaining = await apply_resume(session, attempt)
+        return {"status": "in_progress", "remaining_seconds": max(0, remaining)}
 
 
 @app.post("/api/attempt/{attempt_id}/heartbeat")

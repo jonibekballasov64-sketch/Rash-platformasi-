@@ -3,8 +3,7 @@
 G'oya: o'quvchi to'satdan chiqib ketsa (internet uzildi, Telegram yopildi),
 vaqt "to'xtab turgan" hisoblanadi — davom ettirganda qolgan vaqt uzilgan
 paytdagidek bo'ladi va o'quvchi o'sha savoldan davom etadi.
-Suiiste'molning oldini olish uchun to'xtab turgan vaqt RESUME_GRACE_MINUTES
-bilan cheklanadi: undan uzoq uzilib qolsa, ortiqcha vaqt qaytarilmaydi."""
+Uzilgan vaqt to'liq qaytariladi (cheklov yo'q)."""
 from __future__ import annotations
 
 import datetime as dt
@@ -15,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Attempt, AttemptStatus
 
-RESUME_GRACE_MINUTES = 30
+AWAY_THRESHOLD_SECONDS = 25
 
 
 @dataclass
@@ -83,14 +82,13 @@ async def apply_resume(session: AsyncSession, attempt: Attempt) -> int:
     left_at = _naive(attempt.paused_at) or _naive(attempt.last_seen_at)
 
     if left_at is not None and left_at < deadline:
-        away = now - left_at
-        grace = dt.timedelta(minutes=RESUME_GRACE_MINUTES)
-        away = max(away, dt.timedelta(0))
-        # Qo'lda "vaqtincha to'xtatish": vaqt to'liq to'xtab turadi.
-        # To'satdan uzilish: faqat RESUME_GRACE_MINUTES gacha qaytariladi.
-        credit = away if attempt.pause_reason == "manual" else min(away, grace)
-        deadline = deadline + credit
-        attempt.deadline_at = deadline
+        away = max(now - left_at, dt.timedelta(0))
+        # Heartbeat har ~10 soniyada keladi: undan kichik tanaffus "uzilish"
+        # emas. Haqiqiy uzilishda (internet, Telegram yopildi/yig'ildi) uzilgan
+        # vaqt TO'LIQ qaytariladi — vaqt uzilgan joyda to'xtab turgandek bo'ladi.
+        if away > dt.timedelta(seconds=AWAY_THRESHOLD_SECONDS) or attempt.pause_reason:
+            deadline = deadline + away
+            attempt.deadline_at = deadline
 
     attempt.paused_at = None
     attempt.pause_reason = None
